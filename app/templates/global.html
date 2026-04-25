@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank — Vizualizare Globala{% endblock %}
+{% block content %}
+<h1>Vizualizare Globala</h1>
+{% if not db_links_ok %}
+<div class="alert alert-warning">
+  <strong>DB Links inactive.</strong>
+  Activeaza TLS pe ATP2 in OCI Console (globalbanklocal → Edit → Network →
+  Allow both TLS and mTLS), apoi reincarca.
+</div>
+{% endif %}
+
+<section>
+  <h2>CLIENTI_GLOBAL — reconstructie fragment vertical</h2>
+  {% if clienti %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th><th>Email</th><th>Telefon</th><th>Scor</th></tr>
+    </thead>
+    <tbody>
+      {% for c in clienti %}
+      <tr>
+        <td>{{ c.id_client }}</td>
+        <td>{{ c.nume }}</td>
+        <td>{{ c.prenume }}</td>
+        <td class="mono">{{ c.cnp }}</td>
+        <td>{{ c.email }}</td>
+        <td>{{ c.telefon }}</td>
+        <td>{{ c.scor_credit }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Niciun client (DB Links inactive).</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>CONTURI_GLOBAL — reconstructie fragment orizontal</h2>
+  {% if totals %}
+  <div class="stat-row">
+    {% for t in totals %}
+    <div class="stat">
+      <div class="stat-label">Sucursala {{ t.id_sucursala }}</div>
+      <div class="stat-value">{{ t.nr_conturi }} conturi</div>
+      <div class="stat-value">{{ '%.2f'|format(t.sold_total or 0) }} RON</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if conturi %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>IBAN</th><th>Tip</th><th>Sold</th><th>Moneda</th><th>Sucursala</th><th>Nod</th></tr>
+    </thead>
+    <tbody>
+      {% for c in conturi %}
+      <tr>
+        <td>{{ c.id_cont }}</td>
+        <td class="mono">{{ c.iban }}</td>
+        <td>{{ c.id_tip }}</td>
+        <td class="num">{{ '%.2f'|format(c.sold) }}</td>
+        <td>{{ c.moneda }}</td>
+        <td>{{ c.id_sucursala }}</td>
+        <td><span class="badge badge-{{ c.nod|lower }}">{{ c.nod }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Niciun cont (DB Links inactive).</p>
+  {% endif %}
+</section>
+{% endblock %}

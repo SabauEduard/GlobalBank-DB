@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank — Demo: Local → Global{% endblock %}
+{% block content %}
+<h1>Demo: Inserare Locala Vizibila Global</h1>
+<p>Demonstreaza <strong>transparenta locatie</strong>: o inserare directa intr-un fragment local
+   devine imediat vizibila in vederea globala CONTURI_GLOBAL.</p>
+
+<form method="post" class="form-card">
+  <h2>Adauga cont in fragment local</h2>
+  <label>Sucursala
+    <select name="branch">
+      {% for key, meta in branches.items() %}
+      <option value="{{ key }}">{{ meta.label }} (ID_Sucursala={{ meta.id_sucursala }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>IBAN <input name="iban" required placeholder="RO49GLOB0000000000000099"></label>
+  <label>Sold initial <input name="sold" type="number" step="0.01" value="1000"></label>
+  <label>Client
+    <select name="id_client">
+      {% for cl in clienti %}
+      <option value="{{ cl.id_client }}">{{ cl.id_client }} – {{ cl.nume }} {{ cl.prenume }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn">Insereaza local</button>
+</form>
+
+{% if inserted %}
+<div class="alert alert-success">
+  Cont IBAN <strong>{{ inserted.iban }}</strong> inserat direct in fragmentul local <strong>{{ inserted.branch }}</strong>.
+</div>
+
+<div class="diff-view">
+  <div>
+    <h3>CONTURI_B (Bucuresti) — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in before_b %}<tr class="before"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in after_b %}
+        <tr class="{% if r not in before_b %}new-row{% endif %}">
+          <td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>CONTURI_C (Cluj) — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in before_c %}<tr class="before"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in after_c %}
+        <tr class="{% if r not in before_c %}new-row{% endif %}">
+          <td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="note">Nota: CONTURI_GLOBAL = CONTURI_B ∪ CONTURI_C via DB Links (necesita TLS activ).</p>
+{% endif %}
+
+<hr>
+<h2>Fragmentare verticala — structura CLIENTI</h2>
+<p>Relatia <strong>CLIENTI</strong> este fragmentata <em>vertical</em>: datele de identificare
+   (Nume, Prenume, CNP) sunt stocate in nodurile locale, iar profilul (Email, Telefon,
+   Scor_Credit) este stocat in nodul central. Vederea <code>CLIENTI_GLOBAL</code> le reuneste
+   printr-un JOIN via DB Links.</p>
+
+<div class="diff-view">
+  <div>
+    <h3>CLIENTI_ID@BUCHAREST (fragment identificare)</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in clienti_b %}
+        <tr><td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td></tr>
+        {% else %}<tr><td colspan="4">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>CLIENTI_ID@CLUJ (fragment identificare)</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in clienti_c %}
+        <tr><td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td></tr>
+        {% else %}<tr><td colspan="4">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="diff-view" style="margin-top:1rem">
+  <div>
+    <h3>CLIENTI_PROFIL@CENTRAL (fragment profil)</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Email</th><th>Telefon</th><th>Scor_Credit</th></tr></thead>
+      <tbody>
+        {% for r in clienti_profil %}
+        <tr><td>{{ r.id_client }}</td><td>{{ r.email }}</td><td>{{ r.telefon }}</td><td>{{ r.scor_credit }}</td></tr>
+        {% else %}<tr><td colspan="4">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Explicatie fragmentare verticala</h3>
+    <p>Fragmentare: <code>F1(ID_Client, Nume, Prenume, CNP)</code> stocat pe ATP2
+       (noduri Bucharest si Cluj).</p>
+    <p><code>F2(ID_Client, Email, Telefon, Scor_Credit)</code> stocat pe ATP1
+       (nodul Central).</p>
+    <p>Reconstructie completa: <code>CLIENTI_GLOBAL = F1 ⋈ F2</code> via DB Links.</p>
+    <p>INSERT via <code>CLIENTI_GLOBAL</code> → trigger INSTEAD OF scrie automat
+       in ambele fragmente simultan.</p>
+  </div>
+</div>
+{% endblock %}

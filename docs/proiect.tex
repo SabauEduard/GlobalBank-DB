@@ -1,0 +1,692 @@
+\documentclass[12pt,a4paper]{article}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[romanian]{babel}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tocloft}
+\usepackage{caption}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tikz}
+\usepackage{pgf-umlcd}
+\usepackage{todonotes}
+\usepackage{mdframed}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{tabularx}
+
+% ── Page layout ───────────────────────────────────────────────────────────────
+\geometry{a4paper, left=2.5cm, right=2cm, top=2.5cm, bottom=2.5cm}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{GlobalBank DB — Baze de Date Distribuite}
+\fancyhead[R]{MODBD IF 2025-2026}
+\fancyfoot[C]{\thepage}
+
+% ── SQL / Python listing style ─────────────────────────────────────────────────
+\lstdefinestyle{sqlstyle}{
+    language=SQL,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray}\itshape,
+    stringstyle=\color{red},
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    backgroundcolor=\color{gray!8},
+    tabsize=2,
+    captionpos=b
+}
+\lstdefinestyle{pystyle}{
+    language=Python,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{purple}\bfseries,
+    commentstyle=\color{gray}\itshape,
+    stringstyle=\color{teal},
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    backgroundcolor=\color{blue!4},
+    tabsize=2,
+    captionpos=b
+}
+\lstset{style=sqlstyle}
+
+% ── Screenshot placeholder ────────────────────────────────────────────────────
+% Usage: \screenshot{subfolder/filename.png}{Caption}
+\newcommand{\screenshot}[2]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{assets/screenshots/#1}{%
+      \includegraphics[width=0.95\textwidth]{assets/screenshots/#1}%
+    }{%
+      \begin{mdframed}[backgroundcolor=yellow!15, linecolor=orange, linewidth=1pt]
+        \centering\vspace{0.5cm}
+        \textcolor{orange}{\textbf{[SCREENSHOT NECESAR]}}\\[0.3cm]
+        \texttt{#1}\\[0.3cm]
+        \textit{#2}
+        \vspace{0.5cm}
+      \end{mdframed}%
+    }%
+    \caption{#2}
+  \end{figure}%
+}
+
+% ── Diagram placeholder ───────────────────────────────────────────────────────
+\newcommand{\diagramplaceholder}[2]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{assets/diagrams/#1}{%
+      \includegraphics[width=0.95\textwidth]{assets/diagrams/#1}%
+    }{%
+      \begin{mdframed}[backgroundcolor=blue!5, linecolor=blue!40, linewidth=1pt]
+        \centering\vspace{1cm}
+        \textcolor{blue!60}{\textbf{[DIAGRAMĂ]}}\\[0.3cm]
+        \texttt{#1}\\[0.3cm]
+        \textit{#2}
+        \vspace{1cm}
+      \end{mdframed}%
+    }%
+    \caption{#2}
+  \end{figure}%
+}
+
+% ── Hyperref ──────────────────────────────────────────────────────────────────
+\hypersetup{
+    colorlinks=true, linkcolor=blue, urlcolor=cyan,
+    pdftitle={GlobalBank DB — Proiect MODBD 2025-2026},
+    pdfauthor={Sabău Eduard},
+}
+
+\graphicspath{{assets/screenshots/}{assets/diagrams/}}
+
+% ── Title ─────────────────────────────────────────────────────────────────────
+\title{
+    \textbf{Metode de Optimizare și Distribuire în Baze de Date} \\[0.5em]
+    \large Proiect: GlobalBank DB \\
+    \normalsize Sistem Bancar Distribuit pe Oracle Cloud ATP
+}
+\author{
+    \textbf{Echipă}: [COMPLETAȚI] \\
+    \textbf{Grupă}: [COMPLETAȚI] \\
+    \textbf{Coordonator}: Gabriela Mihai \\
+    \textbf{Semestrul}: 2, 2025-2026
+}
+\date{\today}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\begin{document}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\maketitle\thispagestyle{empty}
+
+\begin{center}
+\begin{tabular}{ll}
+  \textbf{Baza de date}: & Oracle Autonomous Database 19c (Cloud Free Tier) \\
+  \textbf{Instanțe}:     & ATP1 (bankdb) — Central; ATP2 (globalbanklocal) — Local \\
+  \textbf{Regiune OCI}:  & eu-turin-1 \\
+\end{tabular}
+\end{center}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+\part{Modul Analiză (N1)}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\section{Descrierea modelului și a obiectivelor aplicației}
+
+\textbf{GlobalBank DB} este un sistem de baze de date distribuite destinat unei instituții bancare
+cu sucursale în București și Cluj. Sistemul asigură:
+\begin{itemize}
+  \item Gestiunea distribuită a clienților, conturilor și tranzacțiilor bancare
+  \item Transparența datelor prin vederi globale și triggere INSTEAD OF
+  \item Optimizarea accesului local prin fragmentare orizontală și verticală
+  \item Consistența cataloagelor prin replicare sincronă master→slave
+\end{itemize}
+
+Arhitectura rețelei de baze de date:
+\begin{itemize}
+  \item \textbf{Nod Central (ATP1 — bankdb)}: coordonator, vederi globale, credite, profiluri clienți
+  \item \textbf{Nod Local 1 (ATP2 — BUCHAREST\_USER)}: sucursala București, conturi B, tranzacții B
+  \item \textbf{Nod Local 2 (ATP2 — CLUJ\_USER)}: sucursala Cluj, conturi C, tranzacții C
+\end{itemize}
+Comunicarea inter-nod se realizează prin \textbf{DB Links} (\texttt{BUCHAREST\_LINK}, \texttt{CLUJ\_LINK})
+create cu \texttt{DBMS\_CLOUD\_ADMIN.CREATE\_DATABASE\_LINK} (protocol TCPS/mTLS).
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Diagramele bazei de date OLTP inițiale}
+
+\subsection{Diagrama Entitate-Relație (ER)}
+
+Baza de date OLTP inițială conține \textbf{10 entități independente}, cu normalizare FN3
+și o relație many-to-many (\texttt{ANGAJAT\_CLIENT}).
+
+\diagramplaceholder{er-diagram.png}{Diagrama Entitate-Relație — GlobalBank DB (10 entități, FN3)}
+
+Entitățile și relațiile principale:
+
+\begin{longtable}{lll}
+\toprule
+\textbf{Entitate} & \textbf{Atribute cheie} & \textbf{Relații} \\
+\midrule
+SUCURSALE & ID\_Sucursala (PK), Denumire, Oras & — \\
+CLIENTI & ID\_Client, Nume, Prenume, CNP, Email, Scor\_Credit & — \\
+CONTURI & ID\_Cont (PK), IBAN, Sold, Moneda & CLIENTI, TIPURI\_CONT, SUCURSALE \\
+TRANZACTII & ID\_Tranzactie (PK), Data, Suma, Tip & CONTURI \\
+CARDURI & ID\_Card (PK), Numar\_Card, Status & CONTURI \\
+ANGAJATI & ID\_Angajat (PK), Nume, Functie, Salariu & SUCURSALE \\
+ANGAJAT\_CLIENT & ID\_Angajat, ID\_Client, Rol & ANGAJATI $\times$ CLIENTI (\textbf{M:N}) \\
+TIPURI\_CONT & ID\_Tip (PK), Denumire, Dobanda & — \\
+CREDITE & ID\_Credit (PK), Suma\_Totala, Rata\_Lunara & CLIENTI \\
+PLATI\_RATE & ID\_Plata (PK), Data\_Plata, Suma & CREDITE \\
+\bottomrule
+\end{longtable}
+
+\textbf{Normalizare FN3}:
+\begin{itemize}
+  \item FN1: toate atributele sunt atomice, fără grupuri repetitive
+  \item FN2: toate atributele non-cheie depind de întreaga cheie primară
+  \item FN3: nu există dependențe tranzitive (ex: Scor\_Credit depinde de ID\_Client, nu de altceva)
+\end{itemize}
+
+\subsection{Diagrama conceptuală OLTP}
+
+\diagramplaceholder{conceptual-diagram.png}{Diagrama conceptuală a bazei de date OLTP inițiale}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Descrierea modului de distribuire}
+
+Rețeaua de baze de date conține \textbf{2 servere Oracle ATP} (instanțe Oracle Cloud):
+
+\begin{center}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Server} & \textbf{Instanță} & \textbf{Schemă} & \textbf{Rol} & \textbf{Regiune} \\
+\midrule
+ATP1 & bankdb & GLOBAL\_USER & Nod Global / Central & eu-turin-1 \\
+ATP2 & globalbanklocal & BUCHAREST\_USER & Nod Local 1 & eu-turin-1 \\
+ATP2 & globalbanklocal & CLUJ\_USER & Nod Local 2 & eu-turin-1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textit{Notă}: ATP2 găzduiește ambele noduri locale pe aceeași instanță Oracle Cloud Free Tier,
+în scheme separate, simulate ca noduri independente prin DB Links distincte.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Argumentarea deciziei de fragmentare}
+
+\subsection{Fragmentare orizontală primară — CONTURI}
+
+\textbf{Motivație}: Fiecare sucursală operează cu propriile conturi. Accesul local este mai frecvent
+(95\%) decât accesul global. Fragmentarea reduce traficul de rețea.
+
+\textbf{Predicat de selecție}: $p_1: ID\_Sucursala = 1$ (București); $p_2: ID\_Sucursala = 2$ (Cluj)
+
+\textbf{Aplicarea algoritmului de fragmentare orizontală primară (date ipotetice)}:
+
+\begin{enumerate}
+  \item \textit{Identificarea predicatelor simple}: $p_1 = (ID\_Sucursala = 1)$, $p_2 = (ID\_Sucursala = 2)$
+  \item \textit{Verificarea completitudinii}: $p_1 \lor p_2$ acoperă toate valorile posibile (CHECK constraint garantează $ID\_Sucursala \in \{1,2\}$)
+  \item \textit{Verificarea minimalității}: $p_1 \land p_2 = \emptyset$ (disjuncte)
+  \item \textit{Obținerea fragmentelor}:
+    \begin{itemize}
+      \item $CONTURI\_B = \sigma_{ID\_Sucursala=1}(CONTURI)$ → 10 conturi la București
+      \item $CONTURI\_C = \sigma_{ID\_Sucursala=2}(CONTURI)$ → 10 conturi la Cluj
+    \end{itemize}
+  \item \textit{Reconstrucție}: $CONTURI = CONTURI\_B \cup CONTURI\_C$
+\end{enumerate}
+
+\subsection{Fragmentare orizontală derivată — TRANZACTII}
+
+\textbf{Motivație}: Tranzacțiile sunt asociate conturilor; dacă un cont este la București,
+tranzacțiile sale sunt și ele la București (localitate tranzacțională).
+
+\textbf{Join semnat}:
+$TRANZACTII\_B = TRANZACTII \ltimes CONTURI\_B$ (via $ID\_Cont\_Sursa \in [1, 999999]$)
+$TRANZACTII\_C = TRANZACTII \ltimes CONTURI\_C$ (via $ID\_Cont\_Sursa \in [1000001, 1999999]$)
+
+Fragmentele derivate obținute: \texttt{TRANZACTII\_B} (20 rânduri) și \texttt{TRANZACTII\_C} (20 rânduri).
+
+\subsection{Fragmentare verticală — CLIENTI}
+
+\textbf{Motivație}: Datele de identificare (Nume, CNP) sunt accesate local la fiecare sucursală;
+datele de profil financiar (Email, Scor\_Credit) sunt gestionate central (scoring centralizat).
+
+\textbf{Aplicarea algoritmului de fragmentare verticală (afinitate atribute, date ipotetice)}:
+
+Matricea de afinitate (frecvențe de acces împreună per aplicație):
+
+\begin{center}
+\begin{tabular}{l|ccccc}
+\toprule
+ & ID\_Client & Nume & CNP & Email & Scor\_Credit \\
+\midrule
+App locală & 10 & 10 & 10 & 2 & 1 \\
+App scoring & 5 & 0 & 0 & 8 & 10 \\
+App globală & 10 & 10 & 10 & 10 & 10 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Grupare}: atributele cu afinitate ridicată împreună:
+\begin{itemize}
+  \item Grup 1 (acces local): $\{ID\_Client, Nume, Prenume, CNP\}$ → \texttt{CLIENTI\_ID} pe noduri locale
+  \item Grup 2 (acces central/scoring): $\{ID\_Client, Email, Telefon, Scor\_Credit\}$ → \texttt{CLIENTI\_PROFIL} pe nodul central
+\end{itemize}
+
+\textbf{Reconstrucție}: $CLIENTI = CLIENTI\_ID \bowtie_{ID\_Client} CLIENTI\_PROFIL$
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Verificarea corectitudinii fragmentărilor}
+
+\subsection{Completitudine}
+\begin{itemize}
+  \item \textbf{Orizontală}: $\forall r \in CONTURI: r \in CONTURI\_B \lor r \in CONTURI\_C$
+    (garantat prin CHECK constraint $ID\_Sucursala \in \{1,2\}$)
+  \item \textbf{Verticală}: orice client are rând în \texttt{CLIENTI\_ID} (ambele noduri) și \texttt{CLIENTI\_PROFIL}
+    (garantat prin triggerul INSTEAD OF INSERT pe CLIENTI\_GLOBAL care inserează simultan în toate fragmentele)
+\end{itemize}
+
+\subsection{Disjuncție}
+\begin{itemize}
+  \item \textbf{Orizontală}: $CONTURI\_B \cap CONTURI\_C = \emptyset$
+    (garantat prin \texttt{CHECK(ID\_Sucursala=1)} respectiv \texttt{CHECK(ID\_Sucursala=2)})
+  \item \textbf{Verticală}: atributele din cele două proiecții sunt disjuncte
+    (cu excepția \texttt{ID\_Client} — atribut de legătură)
+\end{itemize}
+
+\subsection{Reconstrucție}
+\begin{lstlisting}[caption={Reconstrucție fragmente — vederi globale}]
+-- Orizontala: UNION ALL (fara deduplicare necesara)
+CONTURI_GLOBAL = CONTURI_B@BUCHAREST_LINK UNION ALL CONTURI_C@CLUJ_LINK
+
+-- Verticala: JOIN pe atributul de legatura
+CLIENTI_GLOBAL = CLIENTI_ID@BUCHAREST_LINK JOIN CLIENTI_PROFIL ON ID_Client
+\end{lstlisting}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Argumentarea deciziei de replicare}
+
+\textbf{Relație replicată}: \texttt{TIPURI\_CONT} (4 rânduri: Curent, Economii, Depozit, Credit)
+
+\textbf{Motivație}:
+\begin{itemize}
+  \item Tabelul este de tip \textit{catalog} — citit frecvent, modificat rar
+  \item Fiecare cont local (\texttt{CONTURI\_B}, \texttt{CONTURI\_C}) are FK către \texttt{TIPURI\_CONT}
+  \item Fără replicare, orice citire a tipului contului ar necesita un DB Link → latență crescută
+  \item Cu replicare, FK-ul local funcționează fără trafic de rețea
+\end{itemize}
+
+\textbf{Tip replicare}: asincronă, tranzacțională, \textbf{single-master}
+(ATP1 → ATP2; modificările se propagă automat prin triggerul \texttt{TRG\_REPLICATE\_TIPURI\_CONT})
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Schemele conceptuale locale}
+
+\subsection{Schema locală București (BUCHAREST\_USER pe ATP2)}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Tabel} & \textbf{Descriere} \\
+\midrule
+TIPURI\_CONT & Copie slave a catalogului (replicat de pe Central) \\
+CLIENTI\_ID & Fragment vertical: date de identificare (Nume, CNP) \\
+CONTURI\_B & Fragment orizontal: conturi cu ID\_Sucursala=1 \\
+TRANZACTII\_B & Fragment orizontal derivat: tranzacții pentru CONTURI\_B \\
+CARDURI\_B & Date locale: carduri atașate conturilor B \\
+ANGAJATI\_B & Date locale: angajați sucursala București \\
+ANGAJAT\_CLIENT\_B & Relație M:N locală: angajat gestionează client \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Secvențe: \texttt{SEQ\_CLIENT\_B} (1–999\,999), \texttt{SEQ\_CONT\_B} (1–999\,999), \texttt{SEQ\_TRANZ\_B} (1–999\,999)
+
+\subsection{Schema locală Cluj (CLUJ\_USER pe ATP2)}
+
+Structură identică cu sufixul \texttt{\_C}. Secvențe pornind de la 1\,000\,001 pentru unicitate globală.
+
+\subsection{Schema globală (GLOBAL\_USER pe ATP1)}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Obiect} & \textbf{Descriere} \\
+\midrule
+SUCURSALE & Master: 2 sucursale (București ID=1, Cluj ID=2) \\
+TIPURI\_CONT & Master al replicării \\
+CLIENTI\_PROFIL & Fragment vertical: date financiare (Email, Scor\_Credit) \\
+CREDITE & Date centrale: credite acordate clienților \\
+PLATI\_RATE & Date centrale: ratele creditelor \\
+LOG\_ACCES & Jurnal de audit global \\
+CLIENTI\_GLOBAL & Vedere: reconstrucție fragment vertical \\
+CONTURI\_GLOBAL & Vedere: reconstrucție fragment orizontal \\
+TRANZACTII\_GLOBAL & Vedere: reconstrucție fragment orizontal derivat \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Lista constrângerilor de integritate}
+
+\subsection{Unicitate}
+
+\textbf{Unicitate locală} (per fragment):
+\begin{lstlisting}[caption={Constrângeri UNIQUE locale}]
+CONTURI_B.IBAN        UNIQUE  -- IBAN unic in fragmentul Bucuresti
+CONTURI_C.IBAN        UNIQUE  -- IBAN unic in fragmentul Cluj
+CLIENTI_ID.CNP        UNIQUE  -- CNP unic pe nodul local
+TIPURI_CONT.Denumire  UNIQUE  -- Denumire unica a tipului de cont
+SUCURSALE.Denumire    UNIQUE
+\end{lstlisting}
+
+\textbf{Unicitate globală pe fragmente orizontale}:
+Garantată prin ranguri de secvențe non-suprapuse:
+\begin{itemize}
+  \item București: \texttt{SEQ\_CONT\_B} generează ID-uri în [1, 999\,999]
+  \item Cluj: \texttt{SEQ\_CONT\_C} generează ID-uri în [1\,000\,001, 1\,999\,999]
+  \item Central: \texttt{SEQ\_CLIENT\_GLOBAL} generează ID-uri de la 2\,000\,001
+\end{itemize}
+Fără coordonare centralizată, fiecare fragment produce ID-uri unice global.
+
+\textbf{Unicitate globală pentru fragmente verticale}:
+\texttt{CLIENTI\_ID.CNP} este UNIQUE pe fiecare nod local $\Rightarrow$ unicitatea globală a CNP
+este garantată de triggerul INSTEAD OF care inserează simultan pe ambii noduri
+(dacă CNP există deja pe oricare nod, INSERT eșuează prin constrângerea locală).
+
+\subsection{Cheie primară}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Tabel} & \textbf{Cheie primară} & \textbf{Nivel} \\
+\midrule
+CONTURI\_B / CONTURI\_C & ID\_Cont & Local \\
+TRANZACTII\_B / C & ID\_Tranzactie & Local \\
+CLIENTI\_ID & ID\_Client & Local \\
+CLIENTI\_PROFIL & ID\_Client & Central \\
+TIPURI\_CONT & ID\_Tip & Local + Central \\
+CREDITE & ID\_Credit & Central \\
+PLATI\_RATE & ID\_Plata & Central \\
+SUCURSALE & ID\_Sucursala & Central \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Cheie externă}
+
+\textbf{Locale (DDL, same instance)}:
+\begin{lstlisting}[caption={FK-uri locale}]
+CONTURI_B.ID_Tip     -> TIPURI_CONT.ID_Tip    (FK local pe ATP2)
+CONTURI_B.ID_Client  -> CLIENTI_ID.ID_Client  (FK local pe ATP2)
+PLATI_RATE.ID_Credit -> CREDITE.ID_Credit     (FK local pe ATP1)
+\end{lstlisting}
+
+\textbf{Cross-nod (simulate prin triggere — Oracle nu suportă DDL FK inter-instance)}:
+\begin{lstlisting}[caption={FK cross-nod implementate prin triggere}]
+-- TRG_BEF_INS_CREDITE (pe ATP1):
+-- CREDITE.ID_Client trebuie sa existe in CLIENTI_ID@BUCHAREST_LINK
+BEFORE INSERT ON CREDITE FOR EACH ROW DECLARE v_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO v_count
+  FROM CLIENTI_ID@BUCHAREST_LINK
+  WHERE ID_Client = :NEW.ID_Client;
+  IF v_count = 0 THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Client inexistent');
+  END IF;
+END;
+\end{lstlisting}
+
+\subsection{Validare (CHECK constraints)}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Constrângere} & \textbf{Scop} \\
+\midrule
+\texttt{CONTURI\_B: CHECK(ID\_Sucursala=1)} & Puritate fragment orizontal \\
+\texttt{CONTURI\_C: CHECK(ID\_Sucursala=2)} & Puritate fragment orizontal \\
+\texttt{TRANZACTII: CHECK(Tip\_Tranzactie IN ('DEBIT','CREDIT','TRANSFER'))} & Validare domeniu \\
+\texttt{TIPURI\_CONT: CHECK(Dobanda BETWEEN 0 AND 100)} & Validare domeniu \\
+\texttt{CLIENTI\_PROFIL: CHECK(Scor\_Credit BETWEEN 0 AND 999)} & Validare scoring \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Cerere SQL complexă și tehnici de optimizare}
+
+\textbf{Formulare în limbaj natural}: \\
+\textit{„Afișați suma totală tranzacționată și soldul total al conturilor, pentru fiecare client
+cu scor de credit peste 700, indiferent de sucursala la care are conturi, ordonat descrescător
+după suma tranzacționată."}
+
+Această cerere implică:
+\begin{itemize}
+  \item JOIN distribuit pe 3 vederi globale (accesează simultan ATP1 și ATP2)
+  \item Filtru pe \texttt{CLIENTI\_PROFIL.Scor\_Credit} (stocată central)
+  \item Agregare cross-fragment (\texttt{SUM}, \texttt{COUNT} pe date de pe ambele noduri locale)
+\end{itemize}
+
+\textbf{Tehnici de optimizare aplicabile}:
+\begin{itemize}
+  \item \textbf{Index pe coloana de filtru}: \texttt{CREATE INDEX idx\_clienti\_profil\_scor ON CLIENTI\_PROFIL(Scor\_Credit)}
+    → reduce FULL TABLE SCAN la INDEX RANGE SCAN (avantaj: cost 1 vs. cost N; dezavantaj: overhead la INSERT)
+  \item \textbf{Semi-join reduction}: optimizatorul poate transfera predicatul \texttt{Scor\_Credit > 700}
+    pe nodul central înainte de a cere date din nodurile locale (reduce trafic de rețea)
+  \item \textbf{Push-down predicates}: Oracle trimite predicatele WHERE în query-ul REMOTE
+    (vizibil în EXPLAIN PLAN la secțiunea „Remote SQL Information")
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\part{Modul Implementare Baze de Date (N2)}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\section{Crearea bazelor de date și utilizatorilor}
+
+\subsection{GLOBAL\_USER pe ATP1 (Central)}
+\lstinputlisting[caption={sql/global/00-setup-global-user.sql},style=sqlstyle]{../sql/global/00-setup-global-user.sql}
+\screenshot{N2-bd/01-users/01-global-user-created.png}{GLOBAL\_USER creat cu succes pe ATP1}
+
+\subsection{BUCHAREST\_USER pe ATP2 (Local)}
+\lstinputlisting[caption={sql/bucharest/00-setup-bucharest.sql},style=sqlstyle]{../sql/bucharest/00-setup-bucharest.sql}
+\screenshot{N2-bd/01-users/02-bucharest-user-created.png}{BUCHAREST\_USER creat cu succes pe ATP2}
+
+\subsection{CLUJ\_USER pe ATP2 (Local)}
+\lstinputlisting[caption={sql/cluj/00-setup-cluj.sql},style=sqlstyle]{../sql/cluj/00-setup-cluj.sql}
+\screenshot{N2-bd/01-users/03-cluj-user-created.png}{CLUJ\_USER creat cu succes pe ATP2}
+
+\subsection{DB Links (GLOBAL\_USER pe ATP1)}
+\lstinputlisting[caption={sql/global/01b-db-links-global-user.sql},style=sqlstyle]{../sql/global/01b-db-links-global-user.sql}
+\screenshot{N2-bd/01-users/04-db-links-verified.png}{BUCHAREST\_LINK și CLUJ\_LINK verificate cu SELECT 1 FROM DUAL@...}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Crearea relațiilor și fragmentelor}
+
+\subsection{Schema centrală (GLOBAL\_USER)}
+\lstinputlisting[caption={sql/global/02-schema-central.sql},style=sqlstyle]{../sql/global/02-schema-central.sql}
+\screenshot{N2-bd/02-schema/01-central-schema.png}{Tabele centrale create: SUCURSALE, TIPURI\_CONT, CLIENTI\_PROFIL, CREDITE, PLATI\_RATE, LOG\_ACCES}
+
+\subsection{Fragment orizontal — București (BUCHAREST\_USER)}
+\lstinputlisting[caption={sql/bucharest/01-schema-bucharest.sql},style=sqlstyle]{../sql/bucharest/01-schema-bucharest.sql}
+\screenshot{N2-bd/02-schema/02-bucharest-schema.png}{Tabele București create: CONTURI\_B, TRANZACTII\_B, CLIENTI\_ID și altele}
+
+\subsection{Fragment orizontal — Cluj (CLUJ\_USER)}
+\lstinputlisting[caption={sql/cluj/01-schema-cluj.sql},style=sqlstyle]{../sql/cluj/01-schema-cluj.sql}
+\screenshot{N2-bd/02-schema/03-cluj-schema.png}{Tabele Cluj create: CONTURI\_C, TRANZACTII\_C, CLIENTI\_ID și altele}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Popularea cu date}
+
+\lstinputlisting[caption={sql/global/03-populate-central.sql},style=sqlstyle]{../sql/global/03-populate-central.sql}
+\screenshot{N2-bd/03-populate/01-central-populated.png}{10 CLIENTI\_PROFIL, 5 CREDITE, 15 PLATI\_RATE inserate pe Central}
+
+\lstinputlisting[caption={sql/bucharest/02-populate-bucharest.sql},style=sqlstyle]{../sql/bucharest/02-populate-bucharest.sql}
+\screenshot{N2-bd/03-populate/02-bucharest-populated.png}{59 rânduri inserate pe nodul București}
+
+\lstinputlisting[caption={sql/cluj/02-populate-cluj.sql},style=sqlstyle]{../sql/cluj/02-populate-cluj.sql}
+\screenshot{N2-bd/03-populate/03-cluj-populated.png}{59 rânduri inserate pe nodul Cluj}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Furnizarea formelor de transparență}
+
+\lstinputlisting[caption={sql/global/04-transparency.sql},style=sqlstyle]{../sql/global/04-transparency.sql}
+
+\subsection{Transparență verticală — CLIENTI\_GLOBAL}
+\screenshot{N2-bd/04-transparency/01-clienti-global-view.png}{CLIENTI\_GLOBAL returnează 10 clienți reconstituiți din ambele fragmente}
+\screenshot{N2-bd/04-transparency/02-s1-insert-global.png}{S1: INSERT via CLIENTI\_GLOBAL — rândul apare în CLIENTI\_ID@BUCHAREST\_LINK și @CLUJ\_LINK}
+
+\subsection{Transparență orizontală — CONTURI\_GLOBAL și TRANZACTII\_GLOBAL}
+\screenshot{N2-bd/04-transparency/03-conturi-global-view.png}{CONTURI\_GLOBAL returnează 20 conturi (B=10, C=10)}
+\screenshot{N2-bd/04-transparency/04-s2-transfer.png}{S2: UPDATE ID\_Sucursala=2 — contul se mută din CONTURI\_B în CONTURI\_C (Nod B→C)}
+
+\subsection{Transparență tabele altă BD față de aplicație}
+Aplicația Flask se conectează exclusiv la \texttt{GLOBAL\_USER} pe ATP1 și accesează datele
+din ATP2 prin DB Links, ca și când nu ar exista distribuire.
+\screenshot{N2-bd/04-transparency/05-app-global-connection.png}{Aplicația Flask — ruta /global returnează date din ambele noduri locale}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Sincronizarea datelor pentru relațiile replicate}
+
+\lstinputlisting[caption={sql/global/08-replication.sql},style=sqlstyle]{../sql/global/08-replication.sql}
+\screenshot{N2-bd/08-replication/01-initial-sync.png}{Sincronizare inițială: 4 rânduri MERGE în TIPURI\_CONT@BUCHAREST\_LINK și @CLUJ\_LINK}
+\screenshot{N2-bd/08-replication/02-s6-replication-trigger.png}{S6: INSERT pe TIPURI\_CONT master → apare automat în ambele slave (COUNT=1 pe fiecare nod)}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Constrângeri de integritate}
+
+\lstinputlisting[caption={sql/global/05-constraints.sql},style=sqlstyle]{../sql/global/05-constraints.sql}
+\lstinputlisting[caption={sql/global/07-cross-node-fk.sql},style=sqlstyle]{../sql/global/07-cross-node-fk.sql}
+
+\screenshot{N2-bd/05-constraints/01-s4-local-visible-global.png}{S4: INSERT direct în CONTURI\_B → vizibil imediat în CONTURI\_GLOBAL cu Nod=B}
+\screenshot{N2-bd/05-constraints/02-s5-global-to-both-locals.png}{S5: INSERT via CLIENTI\_GLOBAL → rândul apare în ambele CLIENTI\_ID locale}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\section{Optimizarea cererii SQL}
+
+\lstinputlisting[caption={sql/global/06-optimization.sql},style=sqlstyle]{../sql/global/06-optimization.sql}
+
+\subsection{Plan bazat pe regulă (RBO)}
+\screenshot{N2-bd/06-optimization/01-rule-based-plan.png}{Plan RBO cu hint /*+ RULE */ — full table scans, fără index}
+
+\textit{Etape}: optimizatorul bazat pe regulă ignoră statisticile, aplică reguli fixe de ordine
+a operațiilor (ex: NESTED LOOPS pentru join-uri, ordinea tabelelor din FROM). Nu folosește
+indexul creat, deoarece RBO nu cunoaște statistici de cardinalitate.
+
+\subsection{Plan bazat pe cost (CBO)}
+\screenshot{N2-bd/06-optimization/02-cost-based-plan.png}{EXPLAIN PLAN — CBO folosește IDX\_CLIENTI\_PROFIL\_SCOR (INDEX RANGE SCAN, cost=1)}
+
+\textit{Etape}: CBO analizează statisticile, estimează cardinalitățile, alege INDEX RANGE SCAN
+pe \texttt{IDX\_CLIENTI\_PROFIL\_SCOR} pentru filtrul \texttt{Scor\_Credit > 700}.
+Operațiile REMOTE sunt vizibile pentru ambele DB Links.
+
+\subsection{Sugestii de optimizare aplicate}
+\begin{itemize}
+  \item \textbf{Index creat}: \texttt{CREATE INDEX idx\_clienti\_profil\_scor ON CLIENTI\_PROFIL(Scor\_Credit)}
+  \item \textbf{Îmbunătățire observată}: trecere de la FULL TABLE SCAN (cost $\sim$11) la INDEX RANGE SCAN (cost=1)
+    pe tabela \texttt{CLIENTI\_PROFIL}
+  \item \textbf{Push-down}: Oracle trimite predicatul \texttt{Scor\_Credit > 700} la nodul central
+    înainte de a cere date din nodurile locale, reducând datele transmise prin rețea
+\end{itemize}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\part{Modul Implementare Aplicație (N3)}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\section{Modul gestiune date la nivel local}
+
+Ruta \texttt{/local/<branch>} (Bucharest / Cluj) permite:
+\begin{itemize}
+  \item Vizualizarea conturilor și tranzacțiilor locale
+  \item Adăugarea unui cont nou (\texttt{INSERT INTO CONTURI\_B/C} direct pe ATP2)
+  \item Ștergerea unui cont
+  \item Adăugarea unei tranzacții
+\end{itemize}
+
+\screenshot{N3-app/01-local/01-bucharest-view.png}{Pagina /local/bucharest — lista conturi și tranzacții din CONTURI\_B}
+\screenshot{N3-app/01-local/02-add-cont-form.png}{Formular adăugare cont nou la sucursala București}
+\screenshot{N3-app/01-local/03-cont-added.png}{Confirmare cont adăugat — rândul apare în tabel}
+\screenshot{N3-app/01-local/04-cluj-view.png}{Pagina /local/cluj — lista conturi și tranzacții din CONTURI\_C}
+
+\section{Modul vizualizare date la nivel global}
+
+Ruta \texttt{/global} se conectează la \texttt{GLOBAL\_USER} și afișează:
+\begin{itemize}
+  \item \texttt{CLIENTI\_GLOBAL} — toți clienții reconstituiți din fragmente verticale
+  \item \texttt{CONTURI\_GLOBAL} — toate conturile cu coloana Nod (B/C)
+  \item Totaluri per sucursală (nr. conturi, sold total)
+\end{itemize}
+
+\screenshot{N3-app/02-global/01-global-view.png}{Pagina /global — CLIENTI\_GLOBAL (10 clienți) și CONTURI\_GLOBAL (20 conturi, B+C)}
+\screenshot{N3-app/02-global/02-totals-per-branch.png}{Totaluri: București sold=174300 RON, Cluj sold=129090 RON}
+
+\section{Local → Global: vizualizare modificări locale la nivel global}
+
+\subsection{Fragment orizontal (CONTURI)}
+Ruta \texttt{/demo/local-to-global}: insert direct în \texttt{CONTURI\_B} sau \texttt{CONTURI\_C},
+afișare before/after în \texttt{CONTURI\_GLOBAL}.
+
+\screenshot{N3-app/03-local-to-global/01-form.png}{Formular: selectare sucursală, introducere IBAN, sold}
+\screenshot{N3-app/03-local-to-global/02-before-after-horizontal.png}{Before: 10 conturi B; After: 11 conturi B — rândul nou apare în CONTURI\_GLOBAL}
+
+\subsection{Fragment vertical (CLIENTI)}
+Insert direct în \texttt{CLIENTI\_ID} pe nodul local → verificare în \texttt{CLIENTI\_GLOBAL}.
+
+\screenshot{N3-app/03-local-to-global/03-vertical-before-after.png}{Insert local în CLIENTI\_ID → rândul apare în CLIENTI\_GLOBAL}
+
+\subsection{Relații replicate (TIPURI\_CONT)}
+Insert pe master \texttt{TIPURI\_CONT} → replicat automat pe slave → vizibil în ambele noduri.
+
+\screenshot{N3-app/03-local-to-global/04-replication-demo.png}{Insert TIPURI\_CONT master → COUNT=1 pe BUCHAREST și CLUJ slave}
+
+\section{Global → Local: verificare propagare operații globale la nivel local}
+
+\subsection{Fragment vertical (CLIENTI)}
+Ruta \texttt{/demo/global-to-local}: INSERT via \texttt{CLIENTI\_GLOBAL} →
+triggerul INSTEAD OF propagă la ambele \texttt{CLIENTI\_ID} locale.
+
+\screenshot{N3-app/04-global-to-local/01-form.png}{Formular inserare client via CLIENTI\_GLOBAL}
+\screenshot{N3-app/04-global-to-local/02-propagation-both-nodes.png}{Clientul apare în CLIENTI\_ID@BUCHAREST\_LINK și CLIENTI\_ID@CLUJ\_LINK}
+
+\subsection{Fragment orizontal (CONTURI)}
+INSERT via \texttt{CONTURI\_GLOBAL} cu \texttt{ID\_Sucursala=1} → rândul apare în \texttt{CONTURI\_B};
+cu \texttt{ID\_Sucursala=2} → rândul apare în \texttt{CONTURI\_C}.
+
+\screenshot{N3-app/04-global-to-local/03-horizontal-routing.png}{INSERT via CONTURI\_GLOBAL cu Sucursala=1 → rândul apare în CONTURI\_B (Nod=B)}
+
+\subsection{Relații replicate (TIPURI\_CONT)}
+INSERT pe \texttt{TIPURI\_CONT} global (master) → trigger propagă automat la ambele slave.
+
+\screenshot{N3-app/04-global-to-local/04-replication-propagation.png}{INSERT TIPURI\_CONT global → COUNT=1 pe fiecare nod local slave}
+
+% ── Appendix ──────────────────────────────────────────────────────────────────
+\appendix
+
+\section{Codul aplicației Flask}
+
+\subsection{Conexiuni Oracle (db.py)}
+\lstinputlisting[caption={app/db.py},style=pystyle]{../app/db.py}
+
+\subsection{Rute Flask (app.py)}
+\lstinputlisting[caption={app/app.py},style=pystyle]{../app/app.py}
+
+\end{document}

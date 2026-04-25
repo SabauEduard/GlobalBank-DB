@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank DB — Acasa{% endblock %}
+{% block content %}
+<h1>GlobalBank DB — Baza de Date Distribuita</h1>
+<p>Sistem bancar distribuit pe 3 noduri logice (2 instante Oracle ATP).</p>
+
+<div class="card-grid">
+  <div class="card">
+    <h2>Nod Bucuresti</h2>
+    <p>Fragment orizontal: CONTURI_B, TRANZACTII_B, CLIENTI_ID</p>
+    <a href="{{ url_for('local_view', branch='bucharest') }}" class="btn">Deschide</a>
+  </div>
+  <div class="card">
+    <h2>Nod Cluj</h2>
+    <p>Fragment orizontal: CONTURI_C, TRANZACTII_C, CLIENTI_ID</p>
+    <a href="{{ url_for('local_view', branch='cluj') }}" class="btn">Deschide</a>
+  </div>
+  <div class="card">
+    <h2>Vizualizare Globala</h2>
+    <p>CLIENTI_GLOBAL, CONTURI_GLOBAL via DB Links (necesita TLS activ)</p>
+    <a href="{{ url_for('global_view') }}" class="btn">Deschide</a>
+  </div>
+  <div class="card">
+    <h2>Demo: Transparenta</h2>
+    <p>Inserare locala vizibila in vederea globala</p>
+    <a href="{{ url_for('demo_local_to_global') }}" class="btn">Demo L→G</a>
+    <a href="{{ url_for('demo_global_to_local') }}" class="btn">Demo G→L</a>
+  </div>
+</div>
+{% endblock %}

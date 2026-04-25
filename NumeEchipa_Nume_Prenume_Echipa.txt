@@ -1,0 +1,51 @@
+Proiect: GlobalBank DB — Sistem Bancar Distribuit
+Disciplina: MODBD (Modele si Baze de Date Distribuite)
+An universitar: 2025-2026
+
+=======================================================
+ECHIPA
+=======================================================
+
+Membrul 1:
+  Nume Prenume: [COMPLETATI]
+  Grupa: [COMPLETATI]
+  Contributii: Arhitectura sistemului, schema centrala (ATP1),
+               DB Links, vederi globale si triggere INSTEAD OF,
+               trigger replicare TIPURI_CONT, optimizare,
+               aplicatie Flask (front-end)
+
+=======================================================
+DESCRIEREA SARCINILOR
+=======================================================
+
+T001-T008  Infrastructura: useri Oracle, privilegii, DB Links
+T009-T014  Schema centrala (GLOBAL_USER pe ATP1):
+             SUCURSALE, TIPURI_CONT, CLIENTI_PROFIL,
+             CREDITE, PLATI_RATE, LOG_ACCES
+T015-T020  Schema Bucuresti (BUCHAREST_USER pe ATP2):
+             TIPURI_CONT, CLIENTI_ID, CONTURI_B, TRANZACTII_B,
+             CARDURI_B, ANGAJATI_B, ANGAJAT_CLIENT_B
+T021-T024  Schema Cluj (CLUJ_USER pe ATP2):
+             TIPURI_CONT, CLIENTI_ID, CONTURI_C, TRANZACTII_C,
+             CARDURI_C, ANGAJATI_C, ANGAJAT_CLIENT_C
+T025-T028  Date initiale: 10 clienti, 20 conturi, 40 tranzactii,
+             5 credite, sincronizare TIPURI_CONT
+T029-T040  Transparenta: vederi globale + triggere INSTEAD OF
+             (fragmentare verticala CLIENTI + orizontala CONTURI)
+T041-T044  Interogare complexa distribuita + EXPLAIN PLAN + indexare
+T045-T048  Constrangeri de integritate cross-nod (triggere)
+T049-T050  Replicare TIPURI_CONT (master → slave via DB Links)
+T051-T057  Aplicatie Flask (python-oracledb thin mode)
+T058-T060  Analiza, documentatie, scripturi de predare
+
+=======================================================
+ARHITECTURA TEHNICA
+=======================================================
+
+- Oracle Cloud ATP Free Tier (2 instante, aceeasi regiune: eu-turin-1)
+- ATP1 (bankdb): nodul Central — GLOBAL_USER
+- ATP2 (globalbanklocal): nodurile Locale — BUCHAREST_USER + CLUJ_USER
+- Comunicare inter-nod: DB Links cu DBMS_CLOUD_ADMIN (TCPS/mTLS)
+- Front-end: Flask + python-oracledb thin mode (fara Oracle Client)
+- Fragmente: 2 orizontale (CONTURI, TRANZACTII) + 1 verticala (CLIENTI)
+- Replicare: TIPURI_CONT (master pe ATP1, slave pe ATP2)

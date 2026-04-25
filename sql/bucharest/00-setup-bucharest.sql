@@ -1,0 +1,19 @@
+-- ============================================================
+-- GlobalBank DB — T002+T004: Create BUCHAREST_USER on ATP2
+-- Run as ADMIN on globalbanklocal_high
+-- ============================================================
+
+-- Create schema user
+CREATE USER BUCHAREST_USER IDENTIFIED BY "SecurePass123!";
+
+GRANT CONNECT, RESOURCE    TO BUCHAREST_USER;
+GRANT CREATE TABLE         TO BUCHAREST_USER;
+GRANT CREATE VIEW          TO BUCHAREST_USER;
+GRANT CREATE SEQUENCE      TO BUCHAREST_USER;
+GRANT CREATE TRIGGER       TO BUCHAREST_USER;
+GRANT CREATE PROCEDURE     TO BUCHAREST_USER;
+GRANT UNLIMITED TABLESPACE TO BUCHAREST_USER;
+
+COMMIT;
+
+SELECT 'BUCHAREST_USER created OK' AS status FROM DUAL;

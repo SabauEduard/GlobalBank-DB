@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank — Demo: Replicare{% endblock %}
+{% block content %}
+<h1>Demo: Replicare TIPURI_CONT</h1>
+<p>Demonstreaza <strong>replicarea</strong>: o inserare in tabela master
+   <code>TIPURI_CONT</code> (nodul central ATP1) este propagata automat catre
+   copiile slave de pe ambele noduri locale (ATP2) prin triggere <code>AFTER INSERT</code>.</p>
+<p>Trigger: <code>TRG_REPLICATE_TIPURI_CONT</code> — executa
+   <code>INSERT INTO TIPURI_CONT@BUCHAREST_LINK</code> si
+   <code>INSERT INTO TIPURI_CONT@CLUJ_LINK</code> simultan cu inserarea pe master.</p>
+
+{% if not db_links_ok %}
+<div class="alert alert-warning">
+  <strong>Necesita DB Links active.</strong>
+  Activeaza TLS pe ATP2 in OCI Console si verifica DB Links pe ATP1.
+</div>
+{% endif %}
+
+<h2>Starea curenta a TIPURI_CONT pe toate nodurile</h2>
+<div class="diff-view" style="grid-template-columns: repeat(3, 1fr)">
+  <div>
+    <h3>Master — GLOBAL_USER.TIPURI_CONT (ATP1)</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in master_rows %}
+        <tr><td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td></tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Slave — BUCHAREST_USER.TIPURI_CONT (ATP2)</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in slave_b %}
+        <tr><td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td></tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Slave — CLUJ_USER.TIPURI_CONT (ATP2)</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in slave_c %}
+        <tr><td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td></tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<form method="post" class="form-card">
+  <h2>Adauga tip cont nou pe master (ATP1)</h2>
+  <p>Dupa inserare, triggere-ul <code>TRG_REPLICATE_TIPURI_CONT</code> va propaga
+     automat noul rand catre ambele noduri slave (ATP2).</p>
+  <label>Denumire <input name="denumire" required placeholder="ex: Pensie"></label>
+  <label>Dobanda (%) <input name="dobanda" type="number" step="0.01" min="0" max="100" value="2.50"></label>
+  <button class="btn" {% if not db_links_ok %}disabled title="DB Links inactive"{% endif %}>
+    Insereaza pe master + replica
+  </button>
+</form>
+
+{% if inserted %}
+<div class="alert alert-success">
+  Tip cont <strong>{{ inserted }}</strong> inserat pe master.
+  Triggere-ul AFTER INSERT a replicat automat catre ambele noduri slave:
+</div>
+
+<div class="diff-view" style="grid-template-columns: repeat(3, 1fr)">
+  <div>
+    <h3>Master — dupa inserare</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in after_master %}
+        <tr class="{% if r not in master_rows %}new-row{% endif %}">
+          <td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td>
+        </tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Slave Bucharest — dupa replicare</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in after_b %}
+        <tr class="{% if r not in slave_b %}new-row{% endif %}">
+          <td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td>
+        </tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Slave Cluj — dupa replicare</h3>
+    <table>
+      <thead><tr><th>ID_Tip</th><th>Denumire</th><th>Dobanda %</th></tr></thead>
+      <tbody>
+        {% for r in after_c %}
+        <tr class="{% if r not in slave_c %}new-row{% endif %}">
+          <td>{{ r.id_tip }}</td><td>{{ r.denumire }}</td><td>{{ r.dobanda }}</td>
+        </tr>
+        {% else %}<tr><td colspan="3">—</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="note">Nota: Randul nou apare identic pe toate 3 nodurile — confirma replicarea sincrona
+   prin trigger <code>AFTER INSERT OR UPDATE OR DELETE ON TIPURI_CONT</code>.</p>
+{% endif %}
+{% endblock %}

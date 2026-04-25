@@ -1,0 +1,1661 @@
+========================================================
+GlobalBank DB — Sursa SQL Completa
+Disciplina: MODBD 2025-2026
+========================================================
+
+========================================================
+FILE: sql/global/00-setup-global-user.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T001: Create GLOBAL_USER on ATP1
+-- Run as ADMIN on bankdb_high
+-- ============================================================
+
+-- Create schema user
+CREATE USER GLOBAL_USER IDENTIFIED BY "SecurePass123!";
+
+-- Basic connection + object creation
+GRANT CONNECT, RESOURCE TO GLOBAL_USER;
+GRANT CREATE TABLE       TO GLOBAL_USER;
+GRANT CREATE VIEW        TO GLOBAL_USER;
+GRANT CREATE SEQUENCE    TO GLOBAL_USER;
+GRANT CREATE TRIGGER     TO GLOBAL_USER;
+GRANT CREATE PROCEDURE   TO GLOBAL_USER;
+GRANT CREATE DATABASE LINK TO GLOBAL_USER;
+GRANT UNLIMITED TABLESPACE TO GLOBAL_USER;
+
+-- Required for DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK
+GRANT EXECUTE ON DBMS_CLOUD_ADMIN TO GLOBAL_USER;
+GRANT EXECUTE ON DBMS_CLOUD       TO GLOBAL_USER;
+
+-- Required by DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK internally
+GRANT READ, WRITE ON DIRECTORY DATA_PUMP_DIR TO GLOBAL_USER;
+
+COMMIT;
+
+SELECT 'GLOBAL_USER created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/bucharest/00-setup-bucharest.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T002+T004: Create BUCHAREST_USER on ATP2
+-- Run as ADMIN on globalbanklocal_high
+-- ============================================================
+
+-- Create schema user
+CREATE USER BUCHAREST_USER IDENTIFIED BY "SecurePass123!";
+
+GRANT CONNECT, RESOURCE    TO BUCHAREST_USER;
+GRANT CREATE TABLE         TO BUCHAREST_USER;
+GRANT CREATE VIEW          TO BUCHAREST_USER;
+GRANT CREATE SEQUENCE      TO BUCHAREST_USER;
+GRANT CREATE TRIGGER       TO BUCHAREST_USER;
+GRANT CREATE PROCEDURE     TO BUCHAREST_USER;
+GRANT UNLIMITED TABLESPACE TO BUCHAREST_USER;
+
+COMMIT;
+
+SELECT 'BUCHAREST_USER created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/cluj/00-setup-cluj.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T003+T004: Create CLUJ_USER on ATP2
+-- Run as ADMIN on globalbanklocal_high
+-- ============================================================
+
+-- Create schema user
+CREATE USER CLUJ_USER IDENTIFIED BY "SecurePass123!";
+
+GRANT CONNECT, RESOURCE    TO CLUJ_USER;
+GRANT CREATE TABLE         TO CLUJ_USER;
+GRANT CREATE VIEW          TO CLUJ_USER;
+GRANT CREATE SEQUENCE      TO CLUJ_USER;
+GRANT CREATE TRIGGER       TO CLUJ_USER;
+GRANT CREATE PROCEDURE     TO CLUJ_USER;
+GRANT UNLIMITED TABLESPACE TO CLUJ_USER;
+
+COMMIT;
+
+-- T004: Cross-schema grants so replication trigger can write to both nodes
+GRANT SELECT, INSERT, UPDATE, DELETE ON BUCHAREST_USER.TIPURI_CONT TO CLUJ_USER;
+
+COMMIT;
+
+SELECT 'CLUJ_USER created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/global/01-db-links.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T005-T008: DB Links from ATP1 to ATP2
+-- Run as ADMIN on bankdb_high
+-- ============================================================
+
+-- Drop existing links (idempotent)
+BEGIN DBMS_CLOUD_ADMIN.DROP_DATABASE_LINK(db_link_name => 'BUCHAREST_LINK'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD_ADMIN.DROP_DATABASE_LINK(db_link_name => 'CLUJ_LINK'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD.DROP_CREDENTIAL(credential_name => 'ATP2_BUCHAREST_CRED'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD.DROP_CREDENTIAL(credential_name => 'ATP2_CLUJ_CRED'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T005: Create credentials
+BEGIN
+  DBMS_CLOUD.CREATE_CREDENTIAL(
+    credential_name => 'ATP2_BUCHAREST_CRED',
+    username        => 'BUCHAREST_USER',
+    password        => 'SecurePass123!'
+  );
+END;
+/
+
+BEGIN
+  DBMS_CLOUD.CREATE_CREDENTIAL(
+    credential_name => 'ATP2_CLUJ_CRED',
+    username        => 'CLUJ_USER',
+    password        => 'SecurePass123!'
+  );
+END;
+/
+
+-- T006: Create BUCHAREST_LINK (owned by ADMIN)
+BEGIN
+  DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK(
+    db_link_name       => 'BUCHAREST_LINK',
+    hostname           => 'adb.eu-turin-1.oraclecloud.com',
+    port               => '1521',
+    service_name       => 'g765c070f2106a4_globalbanklocal_high.adb.oraclecloud.com',
+    ssl_server_cert_dn => 'CN=adb.eu-turin-1.oraclecloud.com,O=Oracle Corporation,L=Redwood City,ST=California,C=US',
+    credential_name    => 'ATP2_BUCHAREST_CRED'
+  );
+END;
+/
+
+-- T007: Create CLUJ_LINK (owned by ADMIN)
+BEGIN
+  DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK(
+    db_link_name       => 'CLUJ_LINK',
+    hostname           => 'adb.eu-turin-1.oraclecloud.com',
+    port               => '1521',
+    service_name       => 'g765c070f2106a4_globalbanklocal_high.adb.oraclecloud.com',
+    ssl_server_cert_dn => 'CN=adb.eu-turin-1.oraclecloud.com,O=Oracle Corporation,L=Redwood City,ST=California,C=US',
+    credential_name    => 'ATP2_CLUJ_CRED'
+  );
+END;
+/
+
+-- T008: Verify both links work (as ADMIN)
+SELECT 'BUCHAREST_LINK OK - user: ' || USER AS status FROM DUAL@BUCHAREST_LINK;
+SELECT 'CLUJ_LINK OK - user: '      || USER AS status FROM DUAL@CLUJ_LINK;
+
+========================================================
+FILE: sql/global/01b-db-links-global-user.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — DB Links owned by GLOBAL_USER on ATP1
+-- Run as GLOBAL_USER on bankdb_high
+-- NOTE: Links will compile but fail at USE time until TLS is
+--       enabled on ATP2 (OCI Console → globalbanklocal → Edit →
+--       Network → Allow both TLS and mTLS Authentication)
+-- ============================================================
+
+-- Drop existing (idempotent)
+BEGIN DBMS_CLOUD_ADMIN.DROP_DATABASE_LINK(db_link_name => 'BUCHAREST_LINK'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD_ADMIN.DROP_DATABASE_LINK(db_link_name => 'CLUJ_LINK'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD.DROP_CREDENTIAL(credential_name => 'ATP2_BUCHAREST_CRED'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN DBMS_CLOUD.DROP_CREDENTIAL(credential_name => 'ATP2_CLUJ_CRED'); EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- Credentials
+BEGIN
+  DBMS_CLOUD.CREATE_CREDENTIAL(
+    credential_name => 'ATP2_BUCHAREST_CRED',
+    username        => 'BUCHAREST_USER',
+    password        => 'SecurePass123!'
+  );
+END;
+/
+BEGIN
+  DBMS_CLOUD.CREATE_CREDENTIAL(
+    credential_name => 'ATP2_CLUJ_CRED',
+    username        => 'CLUJ_USER',
+    password        => 'SecurePass123!'
+  );
+END;
+/
+
+-- BUCHAREST_LINK
+BEGIN
+  DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK(
+    db_link_name       => 'BUCHAREST_LINK',
+    hostname           => 'adb.eu-turin-1.oraclecloud.com',
+    port               => '1521',
+    service_name       => 'g765c070f2106a4_globalbanklocal_high.adb.oraclecloud.com',
+    ssl_server_cert_dn => 'CN=adb.eu-turin-1.oraclecloud.com,O=Oracle Corporation,L=Redwood City,ST=California,C=US',
+    credential_name    => 'ATP2_BUCHAREST_CRED'
+  );
+END;
+/
+
+-- CLUJ_LINK
+BEGIN
+  DBMS_CLOUD_ADMIN.CREATE_DATABASE_LINK(
+    db_link_name       => 'CLUJ_LINK',
+    hostname           => 'adb.eu-turin-1.oraclecloud.com',
+    port               => '1521',
+    service_name       => 'g765c070f2106a4_globalbanklocal_high.adb.oraclecloud.com',
+    ssl_server_cert_dn => 'CN=adb.eu-turin-1.oraclecloud.com,O=Oracle Corporation,L=Redwood City,ST=California,C=US',
+    credential_name    => 'ATP2_CLUJ_CRED'
+  );
+END;
+/
+
+-- Verify links exist (creation OK even before TLS is enabled)
+SELECT DB_LINK, USERNAME, HOST FROM USER_DB_LINKS ORDER BY DB_LINK;
+
+-- Test connectivity (will fail with ORA-28759 until TLS is enabled on ATP2)
+-- SELECT 'BUCHAREST_LINK' AS link, USER AS remote_user FROM DUAL@BUCHAREST_LINK;
+-- SELECT 'CLUJ_LINK'      AS link, USER AS remote_user FROM DUAL@CLUJ_LINK;
+
+========================================================
+FILE: sql/global/02-schema-central.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T009-T014: Central Node Schema
+-- Run as GLOBAL_USER on bankdb_high
+-- ============================================================
+
+-- Drop existing objects (idempotent)
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE PLATI_RATE CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CREDITE CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE LOG_ACCES CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTI_PROFIL CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TIPURI_CONT CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE SUCURSALE CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENT_GLOBAL'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CREDIT'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_PLATA'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_LOG'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T009: SUCURSALE + seed 2 rows
+CREATE TABLE SUCURSALE (
+    ID_Sucursala  NUMBER(4)     PRIMARY KEY,
+    Nume          VARCHAR2(100) NOT NULL,
+    Oras          VARCHAR2(50)  NOT NULL,
+    Adresa        VARCHAR2(200) NOT NULL,
+    CONSTRAINT chk_sucursala_oras CHECK (Oras IN ('Bucuresti', 'Cluj'))
+);
+
+INSERT INTO SUCURSALE VALUES (1, 'GlobalBank Bucuresti Centru', 'Bucuresti', 'Bulevardul Unirii 10, Sector 4');
+INSERT INTO SUCURSALE VALUES (2, 'GlobalBank Cluj Napoca',      'Cluj',      'Strada Memorandumului 5, Cluj-Napoca');
+
+-- T010: TIPURI_CONT master + seed 4 rows (replicated to Bucharest/Cluj slaves via trigger)
+CREATE TABLE TIPURI_CONT (
+    ID_Tip    NUMBER(4)    PRIMARY KEY,
+    Denumire  VARCHAR2(50) NOT NULL UNIQUE,
+    Dobanda   NUMBER(5,2)  NOT NULL,
+    CONSTRAINT chk_dobanda CHECK (Dobanda >= 0 AND Dobanda <= 100)
+);
+
+INSERT INTO TIPURI_CONT VALUES (1, 'Curent',   0.00);
+INSERT INTO TIPURI_CONT VALUES (2, 'Economii', 3.50);
+INSERT INTO TIPURI_CONT VALUES (3, 'Depozit',  5.00);
+INSERT INTO TIPURI_CONT VALUES (4, 'Credit',  15.00);
+
+-- T011: CLIENTI_PROFIL (vertical fragment — profile data) + global sequence
+-- SEQ_CLIENT_GLOBAL used by INSTEAD OF trigger on CLIENTI_GLOBAL view
+CREATE SEQUENCE SEQ_CLIENT_GLOBAL START WITH 2000001 MAXVALUE 9999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CLIENTI_PROFIL (
+    ID_Client    NUMBER(10)    PRIMARY KEY,
+    Email        VARCHAR2(150) UNIQUE,
+    Telefon      VARCHAR2(15),
+    Scor_Credit  NUMBER(3)     DEFAULT 500,
+    CONSTRAINT chk_scor  CHECK (Scor_Credit BETWEEN 0 AND 999),
+    CONSTRAINT chk_email CHECK (Email LIKE '%@%.%')
+);
+
+-- T012: CREDITE (cross-node FK to CLIENTI enforced by trigger, not DDL)
+CREATE SEQUENCE SEQ_CREDIT START WITH 2000001 MAXVALUE 9999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CREDITE (
+    ID_Credit    NUMBER(10)   PRIMARY KEY,
+    Suma_Totala  NUMBER(15,2) NOT NULL,
+    Rata_Lunara  NUMBER(10,2) NOT NULL,
+    ID_Client    NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_credit_suma CHECK (Suma_Totala > 0),
+    CONSTRAINT chk_credit_rata CHECK (Rata_Lunara > 0)
+);
+
+-- T013: PLATI_RATE
+CREATE SEQUENCE SEQ_PLATA START WITH 2000001 MAXVALUE 9999999 NOCACHE NOCYCLE;
+
+CREATE TABLE PLATI_RATE (
+    ID_Plata    NUMBER(10)   PRIMARY KEY,
+    Data_Plata  DATE         DEFAULT SYSDATE NOT NULL,
+    Suma        NUMBER(10,2) NOT NULL,
+    ID_Credit   NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_plata_suma  CHECK (Suma > 0),
+    CONSTRAINT fk_plata_credit FOREIGN KEY (ID_Credit) REFERENCES CREDITE(ID_Credit)
+);
+
+-- T014: LOG_ACCES
+CREATE SEQUENCE SEQ_LOG START WITH 1 MAXVALUE 99999999 NOCACHE NOCYCLE;
+
+CREATE TABLE LOG_ACCES (
+    ID_Log     NUMBER(10)    PRIMARY KEY,
+    Utilizator VARCHAR2(50)  NOT NULL,
+    Data_Ora   TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    Actiune    VARCHAR2(200) NOT NULL
+);
+
+COMMIT;
+
+SELECT 'Central schema created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/bucharest/01-schema-bucharest.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T015-T020: Bucharest Node Schema
+-- Run as BUCHAREST_USER on globalbanklocal_high
+-- ============================================================
+
+-- Drop existing objects (idempotent — reverse dependency order)
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJAT_CLIENT_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CARDURI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TRANZACTII_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CONTURI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJATI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTI_ID CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TIPURI_CONT CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENT_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CONT_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_TRANZ_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T015: TIPURI_CONT slave (kept in sync with Central master via replication trigger)
+CREATE TABLE TIPURI_CONT (
+    ID_Tip    NUMBER(4)    PRIMARY KEY,
+    Denumire  VARCHAR2(50) NOT NULL UNIQUE,
+    Dobanda   NUMBER(5,2)  NOT NULL,
+    CONSTRAINT chk_dobanda_b CHECK (Dobanda >= 0 AND Dobanda <= 100)
+);
+
+-- T015: CLIENTI_ID (identification fragment — holds all clients, replicated from both branches)
+CREATE SEQUENCE SEQ_CLIENT_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CLIENTI_ID (
+    ID_Client  NUMBER(10)    PRIMARY KEY,
+    Nume       VARCHAR2(100) NOT NULL,
+    Prenume    VARCHAR2(100) NOT NULL,
+    CNP        CHAR(13)      NOT NULL UNIQUE,
+    CONSTRAINT chk_cnp_len_b CHECK (LENGTH(CNP) = 13)
+);
+
+-- T016: CONTURI_B (horizontal fragment — Bucharest accounts only)
+CREATE SEQUENCE SEQ_CONT_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CONTURI_B (
+    ID_Cont      NUMBER(10)   PRIMARY KEY,
+    IBAN         VARCHAR2(34) NOT NULL UNIQUE,
+    ID_Tip       NUMBER(4)    NOT NULL,
+    Sold         NUMBER(15,2) DEFAULT 0,
+    Moneda       VARCHAR2(3)  DEFAULT 'RON',
+    ID_Sucursala NUMBER(4)    DEFAULT 1 NOT NULL,
+    ID_Client    NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_conturi_b_suc CHECK (ID_Sucursala = 1),
+    CONSTRAINT chk_moneda_b      CHECK (Moneda IN ('RON','EUR','USD')),
+    CONSTRAINT chk_sold_b        CHECK (Sold >= 0),
+    CONSTRAINT fk_conturi_b_cli  FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client),
+    CONSTRAINT fk_conturi_b_tip  FOREIGN KEY (ID_Tip)     REFERENCES TIPURI_CONT(ID_Tip)
+);
+
+-- T017: TRANZACTII_B (derived horizontal fragment — transactions for Bucharest accounts)
+CREATE SEQUENCE SEQ_TRANZ_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE TRANZACTII_B (
+    ID_Tranzactie  NUMBER(10)   PRIMARY KEY,
+    Data           DATE         DEFAULT SYSDATE NOT NULL,
+    Suma           NUMBER(15,2) NOT NULL,
+    Tip_Tranzactie VARCHAR2(20) NOT NULL,
+    ID_Cont_Sursa  NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_tranz_b_suma CHECK (Suma > 0),
+    CONSTRAINT chk_tranz_b_tip  CHECK (Tip_Tranzactie IN ('DEBIT','CREDIT','TRANSFER')),
+    CONSTRAINT fk_tranz_b_cont  FOREIGN KEY (ID_Cont_Sursa) REFERENCES CONTURI_B(ID_Cont)
+);
+
+-- T018: CARDURI_B
+CREATE TABLE CARDURI_B (
+    ID_Card        NUMBER(10)   PRIMARY KEY,
+    Numar_Card     CHAR(16)     NOT NULL UNIQUE,
+    Data_Expirare  DATE         NOT NULL,
+    Status         VARCHAR2(10) DEFAULT 'ACTIV',
+    ID_Cont        NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_card_b_status CHECK (Status IN ('ACTIV','BLOCAT','EXPIRAT')),
+    CONSTRAINT fk_card_b_cont    FOREIGN KEY (ID_Cont) REFERENCES CONTURI_B(ID_Cont)
+);
+
+-- T019: ANGAJATI_B
+CREATE TABLE ANGAJATI_B (
+    ID_Angajat   NUMBER(10)    PRIMARY KEY,
+    Nume         VARCHAR2(100) NOT NULL,
+    Functie      VARCHAR2(50)  NOT NULL,
+    Salariu      NUMBER(10,2)  NOT NULL,
+    ID_Sucursala NUMBER(4)     DEFAULT 1 NOT NULL,
+    CONSTRAINT chk_ang_b_suc CHECK (ID_Sucursala = 1),
+    CONSTRAINT chk_ang_b_sal CHECK (Salariu > 0)
+);
+
+-- T020: ANGAJAT_CLIENT_B (M:N junction — employee manages client)
+CREATE TABLE ANGAJAT_CLIENT_B (
+    ID_Angajat    NUMBER(10)   NOT NULL,
+    ID_Client     NUMBER(10)   NOT NULL,
+    Rol           VARCHAR2(30) DEFAULT 'GESTIONAR',
+    Data_Asignare DATE         DEFAULT SYSDATE,
+    CONSTRAINT pk_ac_b     PRIMARY KEY (ID_Angajat, ID_Client),
+    CONSTRAINT fk_ac_b_ang FOREIGN KEY (ID_Angajat) REFERENCES ANGAJATI_B(ID_Angajat),
+    CONSTRAINT fk_ac_b_cli FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client)
+);
+
+COMMIT;
+
+SELECT 'Bucharest schema created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/cluj/01-schema-cluj.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T021-T024: Cluj Node Schema
+-- Run as CLUJ_USER on globalbanklocal_high
+-- ============================================================
+
+-- Drop existing objects (idempotent — reverse dependency order)
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJAT_CLIENT_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CARDURI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TRANZACTII_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CONTURI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJATI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTI_ID CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TIPURI_CONT CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENT_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CONT_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_TRANZ_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T021: TIPURI_CONT slave (kept in sync with Central master via replication trigger)
+CREATE TABLE TIPURI_CONT (
+    ID_Tip    NUMBER(4)    PRIMARY KEY,
+    Denumire  VARCHAR2(50) NOT NULL UNIQUE,
+    Dobanda   NUMBER(5,2)  NOT NULL,
+    CONSTRAINT chk_dobanda_c CHECK (Dobanda >= 0 AND Dobanda <= 100)
+);
+
+-- T021: CLIENTI_ID (identification fragment — holds all clients, replicated from both branches)
+-- Sequence range 1000000-1999999 for clients registered primarily at Cluj
+CREATE SEQUENCE SEQ_CLIENT_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CLIENTI_ID (
+    ID_Client  NUMBER(10)    PRIMARY KEY,
+    Nume       VARCHAR2(100) NOT NULL,
+    Prenume    VARCHAR2(100) NOT NULL,
+    CNP        CHAR(13)      NOT NULL UNIQUE,
+    CONSTRAINT chk_cnp_len_c CHECK (LENGTH(CNP) = 13)
+);
+
+-- T022: CONTURI_C (horizontal fragment — Cluj accounts only)
+CREATE SEQUENCE SEQ_CONT_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CONTURI_C (
+    ID_Cont      NUMBER(10)   PRIMARY KEY,
+    IBAN         VARCHAR2(34) NOT NULL UNIQUE,
+    ID_Tip       NUMBER(4)    NOT NULL,
+    Sold         NUMBER(15,2) DEFAULT 0,
+    Moneda       VARCHAR2(3)  DEFAULT 'RON',
+    ID_Sucursala NUMBER(4)    DEFAULT 2 NOT NULL,
+    ID_Client    NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_conturi_c_suc CHECK (ID_Sucursala = 2),
+    CONSTRAINT chk_moneda_c      CHECK (Moneda IN ('RON','EUR','USD')),
+    CONSTRAINT chk_sold_c        CHECK (Sold >= 0),
+    CONSTRAINT fk_conturi_c_cli  FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client),
+    CONSTRAINT fk_conturi_c_tip  FOREIGN KEY (ID_Tip)     REFERENCES TIPURI_CONT(ID_Tip)
+);
+
+-- T023: TRANZACTII_C (derived horizontal fragment — transactions for Cluj accounts)
+CREATE SEQUENCE SEQ_TRANZ_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE TRANZACTII_C (
+    ID_Tranzactie  NUMBER(10)   PRIMARY KEY,
+    Data           DATE         DEFAULT SYSDATE NOT NULL,
+    Suma           NUMBER(15,2) NOT NULL,
+    Tip_Tranzactie VARCHAR2(20) NOT NULL,
+    ID_Cont_Sursa  NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_tranz_c_suma CHECK (Suma > 0),
+    CONSTRAINT chk_tranz_c_tip  CHECK (Tip_Tranzactie IN ('DEBIT','CREDIT','TRANSFER')),
+    CONSTRAINT fk_tranz_c_cont  FOREIGN KEY (ID_Cont_Sursa) REFERENCES CONTURI_C(ID_Cont)
+);
+
+-- T024: CARDURI_C
+CREATE TABLE CARDURI_C (
+    ID_Card        NUMBER(10)   PRIMARY KEY,
+    Numar_Card     CHAR(16)     NOT NULL UNIQUE,
+    Data_Expirare  DATE         NOT NULL,
+    Status         VARCHAR2(10) DEFAULT 'ACTIV',
+    ID_Cont        NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_card_c_status CHECK (Status IN ('ACTIV','BLOCAT','EXPIRAT')),
+    CONSTRAINT fk_card_c_cont    FOREIGN KEY (ID_Cont) REFERENCES CONTURI_C(ID_Cont)
+);
+
+-- T024: ANGAJATI_C
+CREATE TABLE ANGAJATI_C (
+    ID_Angajat   NUMBER(10)    PRIMARY KEY,
+    Nume         VARCHAR2(100) NOT NULL,
+    Functie      VARCHAR2(50)  NOT NULL,
+    Salariu      NUMBER(10,2)  NOT NULL,
+    ID_Sucursala NUMBER(4)     DEFAULT 2 NOT NULL,
+    CONSTRAINT chk_ang_c_suc CHECK (ID_Sucursala = 2),
+    CONSTRAINT chk_ang_c_sal CHECK (Salariu > 0)
+);
+
+-- T024: ANGAJAT_CLIENT_C (M:N junction — employee manages client)
+CREATE TABLE ANGAJAT_CLIENT_C (
+    ID_Angajat    NUMBER(10)   NOT NULL,
+    ID_Client     NUMBER(10)   NOT NULL,
+    Rol           VARCHAR2(30) DEFAULT 'GESTIONAR',
+    Data_Asignare DATE         DEFAULT SYSDATE,
+    CONSTRAINT pk_ac_c     PRIMARY KEY (ID_Angajat, ID_Client),
+    CONSTRAINT fk_ac_c_ang FOREIGN KEY (ID_Angajat) REFERENCES ANGAJATI_C(ID_Angajat),
+    CONSTRAINT fk_ac_c_cli FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client)
+);
+
+COMMIT;
+
+SELECT 'Cluj schema created OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/global/03-populate-central.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T025: Central Node Seed Data
+-- Run as GLOBAL_USER on bankdb_high
+-- ============================================================
+
+-- CLIENTI_PROFIL — 10 clients (IDs 1-10, matching CLIENTI_ID on both local nodes)
+INSERT INTO CLIENTI_PROFIL VALUES (1,  'popescu.ion@gmail.com',         '0721234567', 750);
+INSERT INTO CLIENTI_PROFIL VALUES (2,  'ionescu.maria@gmail.com',       '0732345678', 820);
+INSERT INTO CLIENTI_PROFIL VALUES (3,  'georgescu.mihai@yahoo.ro',      '0743456789', 680);
+INSERT INTO CLIENTI_PROFIL VALUES (4,  'stan.elena@gmail.com',          '0754567890', 900);
+INSERT INTO CLIENTI_PROFIL VALUES (5,  'dumitrescu.andrei@hotmail.com', '0765678901', 450);
+INSERT INTO CLIENTI_PROFIL VALUES (6,  'constantin.ana@gmail.com',      '0776789012', 600);
+INSERT INTO CLIENTI_PROFIL VALUES (7,  'popa.dan@yahoo.ro',             '0787890123', 720);
+INSERT INTO CLIENTI_PROFIL VALUES (8,  'moldovan.ioana@gmail.com',      '0798901234', 850);
+INSERT INTO CLIENTI_PROFIL VALUES (9,  'radu.cristian@yahoo.ro',        '0709012345', 550);
+INSERT INTO CLIENTI_PROFIL VALUES (10, 'barbu.simona@gmail.com',        '0710123456', 780);
+
+-- CREDITE — 5 loans for clients 1-5
+INSERT INTO CREDITE VALUES (SEQ_CREDIT.NEXTVAL, 25000.00,  550.00, 1);
+INSERT INTO CREDITE VALUES (SEQ_CREDIT.NEXTVAL, 50000.00, 1200.00, 2);
+INSERT INTO CREDITE VALUES (SEQ_CREDIT.NEXTVAL, 15000.00,  350.00, 3);
+INSERT INTO CREDITE VALUES (SEQ_CREDIT.NEXTVAL, 80000.00, 1800.00, 4);
+INSERT INTO CREDITE VALUES (SEQ_CREDIT.NEXTVAL, 10000.00,  250.00, 5);
+
+-- PLATI_RATE — 15 payments (3 per credit, referencing IDs 2000001-2000005)
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 60,  550.00, 2000001);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 30,  550.00, 2000001);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE,        550.00, 2000001);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 60, 1200.00, 2000002);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 30, 1200.00, 2000002);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE,      1200.00, 2000002);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 60,  350.00, 2000003);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 30,  350.00, 2000003);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE,        350.00, 2000003);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 60, 1800.00, 2000004);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 30, 1800.00, 2000004);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE,      1800.00, 2000004);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 60,  250.00, 2000005);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE - 30,  250.00, 2000005);
+INSERT INTO PLATI_RATE VALUES (SEQ_PLATA.NEXTVAL, SYSDATE,        250.00, 2000005);
+
+-- LOG_ACCES — 5 audit records
+INSERT INTO LOG_ACCES VALUES (SEQ_LOG.NEXTVAL, 'GLOBAL_USER',    SYSTIMESTAMP - INTERVAL '5'  DAY, 'Conectare la nodul central');
+INSERT INTO LOG_ACCES VALUES (SEQ_LOG.NEXTVAL, 'BUCHAREST_USER', SYSTIMESTAMP - INTERVAL '4'  DAY, 'INSERT in CONTURI_B');
+INSERT INTO LOG_ACCES VALUES (SEQ_LOG.NEXTVAL, 'CLUJ_USER',      SYSTIMESTAMP - INTERVAL '3'  DAY, 'INSERT in CONTURI_C');
+INSERT INTO LOG_ACCES VALUES (SEQ_LOG.NEXTVAL, 'GLOBAL_USER',    SYSTIMESTAMP - INTERVAL '1'  DAY, 'SELECT din CONTURI_GLOBAL');
+INSERT INTO LOG_ACCES VALUES (SEQ_LOG.NEXTVAL, 'ADMIN',          SYSTIMESTAMP - INTERVAL '12' HOUR, 'Verificare DB Links');
+
+COMMIT;
+
+SELECT 'Central data populated OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/bucharest/02-populate-bucharest.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T026: Bucharest Node Seed Data
+-- Run as BUCHAREST_USER on globalbanklocal_high
+-- ============================================================
+
+-- TIPURI_CONT seed (mirrors Central master; T028 will re-sync via DB Link once available)
+INSERT INTO TIPURI_CONT VALUES (1, 'Curent',   0.00);
+INSERT INTO TIPURI_CONT VALUES (2, 'Economii', 3.50);
+INSERT INTO TIPURI_CONT VALUES (3, 'Depozit',  5.00);
+INSERT INTO TIPURI_CONT VALUES (4, 'Credit',  15.00);
+
+-- CLIENTI_ID — 10 clients (same IDs as CLIENTI_PROFIL on Central; both nodes hold all clients)
+INSERT INTO CLIENTI_ID VALUES (1,  'Popescu',      'Ion',     '1850101400123');
+INSERT INTO CLIENTI_ID VALUES (2,  'Ionescu',      'Maria',   '2900215350456');
+INSERT INTO CLIENTI_ID VALUES (3,  'Georgescu',    'Mihai',   '1751205180789');
+INSERT INTO CLIENTI_ID VALUES (4,  'Stan',         'Elena',   '2680430120012');
+INSERT INTO CLIENTI_ID VALUES (5,  'Dumitrescu',   'Andrei',  '1920714230345');
+INSERT INTO CLIENTI_ID VALUES (6,  'Constantin',   'Ana',     '2870922560678');
+INSERT INTO CLIENTI_ID VALUES (7,  'Popa',         'Dan',     '1780305090901');
+INSERT INTO CLIENTI_ID VALUES (8,  'Moldovan',     'Ioana',   '2950816410234');
+INSERT INTO CLIENTI_ID VALUES (9,  'Radu',         'Cristian','1631128270567');
+INSERT INTO CLIENTI_ID VALUES (10, 'Barbu',        'Simona',  '2710309190890');
+
+-- CONTURI_B — 10 Bucharest accounts (ID_Sucursala=1, IDs 1-10)
+INSERT INTO CONTURI_B VALUES (1,  'RO49GLOB0000000000000001', 1, 5000.00,  'RON', 1, 1);
+INSERT INTO CONTURI_B VALUES (2,  'RO49GLOB0000000000000002', 2, 12500.00, 'RON', 1, 2);
+INSERT INTO CONTURI_B VALUES (3,  'RO49GLOB0000000000000003', 1,   800.00, 'RON', 1, 3);
+INSERT INTO CONTURI_B VALUES (4,  'RO49GLOB0000000000000004', 3, 50000.00, 'RON', 1, 4);
+INSERT INTO CONTURI_B VALUES (5,  'RO49GLOB0000000000000005', 1,  2300.00, 'RON', 1, 5);
+INSERT INTO CONTURI_B VALUES (6,  'RO49GLOB0000000000000006', 2,  8900.00, 'EUR', 1, 6);
+INSERT INTO CONTURI_B VALUES (7,  'RO49GLOB0000000000000007', 4,     0.00, 'RON', 1, 7);
+INSERT INTO CONTURI_B VALUES (8,  'RO49GLOB0000000000000008', 1, 15600.00, 'RON', 1, 8);
+INSERT INTO CONTURI_B VALUES (9,  'RO49GLOB0000000000000009', 3, 75000.00, 'RON', 1, 9);
+INSERT INTO CONTURI_B VALUES (10, 'RO49GLOB0000000000000010', 2,  4200.00, 'EUR', 1, 10);
+
+-- TRANZACTII_B — 20 transactions (2 per account)
+INSERT INTO TRANZACTII_B VALUES (1,  SYSDATE - 30, 1000.00, 'CREDIT',   1);
+INSERT INTO TRANZACTII_B VALUES (2,  SYSDATE - 15,  500.00, 'DEBIT',    1);
+INSERT INTO TRANZACTII_B VALUES (3,  SYSDATE - 25, 2000.00, 'CREDIT',   2);
+INSERT INTO TRANZACTII_B VALUES (4,  SYSDATE - 10, 1500.00, 'DEBIT',    2);
+INSERT INTO TRANZACTII_B VALUES (5,  SYSDATE - 20,  300.00, 'CREDIT',   3);
+INSERT INTO TRANZACTII_B VALUES (6,  SYSDATE -  5,  200.00, 'DEBIT',    3);
+INSERT INTO TRANZACTII_B VALUES (7,  SYSDATE - 22, 5000.00, 'CREDIT',   4);
+INSERT INTO TRANZACTII_B VALUES (8,  SYSDATE -  8, 2000.00, 'DEBIT',    4);
+INSERT INTO TRANZACTII_B VALUES (9,  SYSDATE - 18,  800.00, 'CREDIT',   5);
+INSERT INTO TRANZACTII_B VALUES (10, SYSDATE -  3,  600.00, 'TRANSFER', 5);
+INSERT INTO TRANZACTII_B VALUES (11, SYSDATE - 28, 1500.00, 'CREDIT',   6);
+INSERT INTO TRANZACTII_B VALUES (12, SYSDATE - 12, 1000.00, 'DEBIT',    6);
+INSERT INTO TRANZACTII_B VALUES (13, SYSDATE - 15, 2500.00, 'CREDIT',   7);
+INSERT INTO TRANZACTII_B VALUES (14, SYSDATE -  6, 1200.00, 'DEBIT',    7);
+INSERT INTO TRANZACTII_B VALUES (15, SYSDATE - 20, 3500.00, 'CREDIT',   8);
+INSERT INTO TRANZACTII_B VALUES (16, SYSDATE -  9, 1800.00, 'DEBIT',    8);
+INSERT INTO TRANZACTII_B VALUES (17, SYSDATE - 24, 8000.00, 'CREDIT',   9);
+INSERT INTO TRANZACTII_B VALUES (18, SYSDATE - 11, 3000.00, 'DEBIT',    9);
+INSERT INTO TRANZACTII_B VALUES (19, SYSDATE - 16,  900.00, 'CREDIT',   10);
+INSERT INTO TRANZACTII_B VALUES (20, SYSDATE -  4,  700.00, 'TRANSFER', 10);
+
+-- CARDURI_B — 5 cards for accounts 1-5
+INSERT INTO CARDURI_B VALUES (1, '4532015112830366', DATE '2028-12-31', 'ACTIV',  1);
+INSERT INTO CARDURI_B VALUES (2, '4916338506082832', DATE '2027-06-30', 'ACTIV',  2);
+INSERT INTO CARDURI_B VALUES (3, '4539578763621486', DATE '2029-03-31', 'ACTIV',  3);
+INSERT INTO CARDURI_B VALUES (4, '4485275742308325', DATE '2026-09-30', 'BLOCAT', 4);
+INSERT INTO CARDURI_B VALUES (5, '4716114061269756', DATE '2028-05-31', 'ACTIV',  5);
+
+-- ANGAJATI_B — 5 Bucharest employees
+INSERT INTO ANGAJATI_B VALUES (1, 'Stoica Bogdan',   'Director',           8500.00, 1);
+INSERT INTO ANGAJATI_B VALUES (2, 'Neagu Alina',     'Consultant Bancar',  4500.00, 1);
+INSERT INTO ANGAJATI_B VALUES (3, 'Preda Marius',    'Casier',             3200.00, 1);
+INSERT INTO ANGAJATI_B VALUES (4, 'Dima Cristina',   'Analist Credite',    5200.00, 1);
+INSERT INTO ANGAJATI_B VALUES (5, 'Manea Florin',    'Responsabil Carduri',4800.00, 1);
+
+-- ANGAJAT_CLIENT_B — 5 assignments
+INSERT INTO ANGAJAT_CLIENT_B VALUES (1, 1,  'DIRECTOR',  SYSDATE - 180);
+INSERT INTO ANGAJAT_CLIENT_B VALUES (2, 3,  'GESTIONAR', SYSDATE - 120);
+INSERT INTO ANGAJAT_CLIENT_B VALUES (2, 4,  'GESTIONAR', SYSDATE - 90);
+INSERT INTO ANGAJAT_CLIENT_B VALUES (3, 5,  'GESTIONAR', SYSDATE - 60);
+INSERT INTO ANGAJAT_CLIENT_B VALUES (4, 2,  'ANALIST',   SYSDATE - 150);
+
+COMMIT;
+
+-- Advance sequences past explicitly-inserted seed IDs (1-10 for CONTURI, 1-20 for TRANZACTII)
+ALTER SEQUENCE SEQ_CLIENT_B INCREMENT BY 10; SELECT SEQ_CLIENT_B.NEXTVAL FROM DUAL; ALTER SEQUENCE SEQ_CLIENT_B INCREMENT BY 1;
+ALTER SEQUENCE SEQ_CONT_B   INCREMENT BY 10; SELECT SEQ_CONT_B.NEXTVAL   FROM DUAL; ALTER SEQUENCE SEQ_CONT_B   INCREMENT BY 1;
+ALTER SEQUENCE SEQ_TRANZ_B  INCREMENT BY 20; SELECT SEQ_TRANZ_B.NEXTVAL  FROM DUAL; ALTER SEQUENCE SEQ_TRANZ_B  INCREMENT BY 1;
+
+SELECT 'Bucharest data populated OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/cluj/02-populate-cluj.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T027: Cluj Node Seed Data
+-- Run as CLUJ_USER on globalbanklocal_high
+-- ============================================================
+
+-- TIPURI_CONT seed (mirrors Central master; T028 will re-sync via DB Link once available)
+INSERT INTO TIPURI_CONT VALUES (1, 'Curent',   0.00);
+INSERT INTO TIPURI_CONT VALUES (2, 'Economii', 3.50);
+INSERT INTO TIPURI_CONT VALUES (3, 'Depozit',  5.00);
+INSERT INTO TIPURI_CONT VALUES (4, 'Credit',  15.00);
+
+-- CLIENTI_ID — same 10 clients as Bucharest (both nodes hold all clients)
+INSERT INTO CLIENTI_ID VALUES (1,  'Popescu',    'Ion',      '1850101400123');
+INSERT INTO CLIENTI_ID VALUES (2,  'Ionescu',    'Maria',    '2900215350456');
+INSERT INTO CLIENTI_ID VALUES (3,  'Georgescu',  'Mihai',    '1751205180789');
+INSERT INTO CLIENTI_ID VALUES (4,  'Stan',       'Elena',    '2680430120012');
+INSERT INTO CLIENTI_ID VALUES (5,  'Dumitrescu', 'Andrei',   '1920714230345');
+INSERT INTO CLIENTI_ID VALUES (6,  'Constantin', 'Ana',      '2870922560678');
+INSERT INTO CLIENTI_ID VALUES (7,  'Popa',       'Dan',      '1780305090901');
+INSERT INTO CLIENTI_ID VALUES (8,  'Moldovan',   'Ioana',    '2950816410234');
+INSERT INTO CLIENTI_ID VALUES (9,  'Radu',       'Cristian', '1631128270567');
+INSERT INTO CLIENTI_ID VALUES (10, 'Barbu',      'Simona',   '2710309190890');
+
+-- CONTURI_C — 10 Cluj accounts (ID_Sucursala=2, IDs 1000001-1000010)
+INSERT INTO CONTURI_C VALUES (1000001, 'RO49GLOB0000001000000001', 1,  3200.00, 'RON', 2, 1);
+INSERT INTO CONTURI_C VALUES (1000002, 'RO49GLOB0000001000000002', 2,  9800.00, 'RON', 2, 2);
+INSERT INTO CONTURI_C VALUES (1000003, 'RO49GLOB0000001000000003', 1,  1500.00, 'RON', 2, 3);
+INSERT INTO CONTURI_C VALUES (1000004, 'RO49GLOB0000001000000004', 3, 35000.00, 'RON', 2, 4);
+INSERT INTO CONTURI_C VALUES (1000005, 'RO49GLOB0000001000000005', 2,  7600.00, 'EUR', 2, 5);
+INSERT INTO CONTURI_C VALUES (1000006, 'RO49GLOB0000001000000006', 1,  4100.00, 'RON', 2, 6);
+INSERT INTO CONTURI_C VALUES (1000007, 'RO49GLOB0000001000000007', 2, 22000.00, 'RON', 2, 7);
+INSERT INTO CONTURI_C VALUES (1000008, 'RO49GLOB0000001000000008', 4,     0.00, 'RON', 2, 8);
+INSERT INTO CONTURI_C VALUES (1000009, 'RO49GLOB0000001000000009', 1,   890.00, 'RON', 2, 9);
+INSERT INTO CONTURI_C VALUES (1000010, 'RO49GLOB0000001000000010', 3, 45000.00, 'RON', 2, 10);
+
+-- TRANZACTII_C — 20 transactions (2 per account, IDs 1000001-1000020)
+INSERT INTO TRANZACTII_C VALUES (1000001, SYSDATE - 29, 1200.00, 'CREDIT',   1000001);
+INSERT INTO TRANZACTII_C VALUES (1000002, SYSDATE - 14,  600.00, 'DEBIT',    1000001);
+INSERT INTO TRANZACTII_C VALUES (1000003, SYSDATE - 26, 2500.00, 'CREDIT',   1000002);
+INSERT INTO TRANZACTII_C VALUES (1000004, SYSDATE - 11, 1800.00, 'DEBIT',    1000002);
+INSERT INTO TRANZACTII_C VALUES (1000005, SYSDATE - 21,  400.00, 'CREDIT',   1000003);
+INSERT INTO TRANZACTII_C VALUES (1000006, SYSDATE -  6,  250.00, 'DEBIT',    1000003);
+INSERT INTO TRANZACTII_C VALUES (1000007, SYSDATE - 23, 4000.00, 'CREDIT',   1000004);
+INSERT INTO TRANZACTII_C VALUES (1000008, SYSDATE -  7, 2500.00, 'DEBIT',    1000004);
+INSERT INTO TRANZACTII_C VALUES (1000009, SYSDATE - 17,  700.00, 'CREDIT',   1000005);
+INSERT INTO TRANZACTII_C VALUES (1000010, SYSDATE -  2,  500.00, 'TRANSFER', 1000005);
+INSERT INTO TRANZACTII_C VALUES (1000011, SYSDATE - 27, 1600.00, 'CREDIT',   1000006);
+INSERT INTO TRANZACTII_C VALUES (1000012, SYSDATE - 13, 1100.00, 'DEBIT',    1000006);
+INSERT INTO TRANZACTII_C VALUES (1000013, SYSDATE - 16, 3000.00, 'CREDIT',   1000007);
+INSERT INTO TRANZACTII_C VALUES (1000014, SYSDATE -  5, 1400.00, 'DEBIT',    1000007);
+INSERT INTO TRANZACTII_C VALUES (1000015, SYSDATE - 19, 4500.00, 'CREDIT',   1000008);
+INSERT INTO TRANZACTII_C VALUES (1000016, SYSDATE - 10, 2200.00, 'DEBIT',    1000008);
+INSERT INTO TRANZACTII_C VALUES (1000017, SYSDATE - 25, 9000.00, 'CREDIT',   1000009);
+INSERT INTO TRANZACTII_C VALUES (1000018, SYSDATE - 12, 3500.00, 'DEBIT',    1000009);
+INSERT INTO TRANZACTII_C VALUES (1000019, SYSDATE - 15, 1100.00, 'CREDIT',   1000010);
+INSERT INTO TRANZACTII_C VALUES (1000020, SYSDATE -  3,  800.00, 'TRANSFER', 1000010);
+
+-- CARDURI_C — 5 cards for accounts 1000001-1000005
+INSERT INTO CARDURI_C VALUES (1000001, '5425233430109903', DATE '2028-08-31', 'ACTIV',  1000001);
+INSERT INTO CARDURI_C VALUES (1000002, '2222420000001113', DATE '2027-04-30', 'ACTIV',  1000002);
+INSERT INTO CARDURI_C VALUES (1000003, '5425233430109929', DATE '2029-01-31', 'ACTIV',  1000003);
+INSERT INTO CARDURI_C VALUES (1000004, '4917300800000000', DATE '2026-11-30', 'BLOCAT', 1000004);
+INSERT INTO CARDURI_C VALUES (1000005, '4007702835532454', DATE '2028-07-31', 'ACTIV',  1000005);
+
+-- ANGAJATI_C — 5 Cluj employees
+INSERT INTO ANGAJATI_C VALUES (1000001, 'Lupsa Andrei',    'Director',           8500.00, 2);
+INSERT INTO ANGAJATI_C VALUES (1000002, 'Chis Mirela',     'Consultant Bancar',  4500.00, 2);
+INSERT INTO ANGAJATI_C VALUES (1000003, 'Bota Emil',       'Casier',             3200.00, 2);
+INSERT INTO ANGAJATI_C VALUES (1000004, 'Suciu Maria',     'Analist Credite',    5200.00, 2);
+INSERT INTO ANGAJATI_C VALUES (1000005, 'Ardelean Ionut',  'Responsabil Carduri',4800.00, 2);
+
+-- ANGAJAT_CLIENT_C — 5 assignments
+INSERT INTO ANGAJAT_CLIENT_C VALUES (1000001, 1,  'DIRECTOR',  SYSDATE - 200);
+INSERT INTO ANGAJAT_CLIENT_C VALUES (1000002, 3,  'GESTIONAR', SYSDATE - 130);
+INSERT INTO ANGAJAT_CLIENT_C VALUES (1000002, 4,  'GESTIONAR', SYSDATE - 100);
+INSERT INTO ANGAJAT_CLIENT_C VALUES (1000003, 5,  'GESTIONAR', SYSDATE -  70);
+INSERT INTO ANGAJAT_CLIENT_C VALUES (1000004, 2,  'ANALIST',   SYSDATE - 160);
+
+COMMIT;
+
+-- Advance sequences past explicitly-inserted seed IDs (1000001-1000010 for CONTURI/TRANZACTII)
+ALTER SEQUENCE SEQ_CLIENT_C INCREMENT BY 10; SELECT SEQ_CLIENT_C.NEXTVAL FROM DUAL; ALTER SEQUENCE SEQ_CLIENT_C INCREMENT BY 1;
+ALTER SEQUENCE SEQ_CONT_C   INCREMENT BY 10; SELECT SEQ_CONT_C.NEXTVAL   FROM DUAL; ALTER SEQUENCE SEQ_CONT_C   INCREMENT BY 1;
+ALTER SEQUENCE SEQ_TRANZ_C  INCREMENT BY 20; SELECT SEQ_TRANZ_C.NEXTVAL  FROM DUAL; ALTER SEQUENCE SEQ_TRANZ_C  INCREMENT BY 1;
+
+SELECT 'Cluj data populated OK' AS status FROM DUAL;
+
+========================================================
+FILE: sql/global/04-transparency.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T029-T040: Global Views + INSTEAD OF Triggers
+-- Run as GLOBAL_USER on bankdb_high
+-- NOTE: Requires DB Links (BUCHAREST_LINK, CLUJ_LINK) to be working
+-- ============================================================
+
+-- Drop existing triggers and views (idempotent)
+BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER trg_iof_tranzactii_global'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER trg_iof_conturi_global';    EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER trg_iof_clienti_global';    EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP VIEW TRANZACTII_GLOBAL'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP VIEW CONTURI_GLOBAL';    EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP VIEW CLIENTI_GLOBAL';    EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- ============================================================
+-- T029: CLIENTI_GLOBAL — vertical fragment reconstruction
+-- UNION deduplicates: Bucharest is authoritative; Cluj supplies
+-- any clients not yet replicated to Bucharest.
+-- ============================================================
+CREATE VIEW CLIENTI_GLOBAL AS
+SELECT ci.ID_Client, ci.Nume, ci.Prenume, ci.CNP,
+       cp.Email, cp.Telefon, cp.Scor_Credit
+FROM   CLIENTI_ID@BUCHAREST_LINK ci
+JOIN   CLIENTI_PROFIL cp ON ci.ID_Client = cp.ID_Client
+UNION
+SELECT ci.ID_Client, ci.Nume, ci.Prenume, ci.CNP,
+       cp.Email, cp.Telefon, cp.Scor_Credit
+FROM   CLIENTI_ID@CLUJ_LINK ci
+JOIN   CLIENTI_PROFIL cp ON ci.ID_Client = cp.ID_Client
+WHERE  ci.ID_Client NOT IN (
+         SELECT ID_Client FROM CLIENTI_ID@BUCHAREST_LINK
+       );
+
+-- ============================================================
+-- T034: CONTURI_GLOBAL — horizontal fragment reconstruction
+-- ============================================================
+CREATE VIEW CONTURI_GLOBAL AS
+SELECT ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client, 'B' AS Nod
+FROM   CONTURI_B@BUCHAREST_LINK
+UNION ALL
+SELECT ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client, 'C' AS Nod
+FROM   CONTURI_C@CLUJ_LINK;
+
+-- ============================================================
+-- T035: TRANZACTII_GLOBAL — derived horizontal fragment reconstruction
+-- ============================================================
+CREATE VIEW TRANZACTII_GLOBAL AS
+SELECT ID_Tranzactie, Data, Suma, Tip_Tranzactie, ID_Cont_Sursa, 'B' AS Nod
+FROM   TRANZACTII_B@BUCHAREST_LINK
+UNION ALL
+SELECT ID_Tranzactie, Data, Suma, Tip_Tranzactie, ID_Cont_Sursa, 'C' AS Nod
+FROM   TRANZACTII_C@CLUJ_LINK;
+
+-- ============================================================
+-- T030/T031/T032: trg_iof_clienti_global
+-- INSERT: generate global ID, write to both CLIENTI_ID nodes + CLIENTI_PROFIL
+-- UPDATE: propagate name/CNP to both nodes, profile data to Central
+-- DELETE: remove from both nodes and Central
+-- ============================================================
+CREATE OR REPLACE TRIGGER trg_iof_clienti_global
+INSTEAD OF INSERT OR UPDATE OR DELETE ON CLIENTI_GLOBAL
+FOR EACH ROW
+DECLARE
+  v_id NUMBER(10);
+BEGIN
+  IF INSERTING THEN
+    v_id := CASE WHEN :NEW.ID_Client IS NOT NULL THEN :NEW.ID_Client
+                 ELSE SEQ_CLIENT_GLOBAL.NEXTVAL
+            END;
+    INSERT INTO CLIENTI_ID@BUCHAREST_LINK (ID_Client, Nume, Prenume, CNP)
+      VALUES (v_id, :NEW.Nume, :NEW.Prenume, :NEW.CNP);
+    INSERT INTO CLIENTI_ID@CLUJ_LINK (ID_Client, Nume, Prenume, CNP)
+      VALUES (v_id, :NEW.Nume, :NEW.Prenume, :NEW.CNP);
+    INSERT INTO CLIENTI_PROFIL (ID_Client, Email, Telefon, Scor_Credit)
+      VALUES (v_id, :NEW.Email, :NEW.Telefon, NVL(:NEW.Scor_Credit, 500));
+
+  ELSIF UPDATING THEN
+    UPDATE CLIENTI_ID@BUCHAREST_LINK
+      SET Nume=:NEW.Nume, Prenume=:NEW.Prenume, CNP=:NEW.CNP
+      WHERE ID_Client = :OLD.ID_Client;
+    UPDATE CLIENTI_ID@CLUJ_LINK
+      SET Nume=:NEW.Nume, Prenume=:NEW.Prenume, CNP=:NEW.CNP
+      WHERE ID_Client = :OLD.ID_Client;
+    UPDATE CLIENTI_PROFIL
+      SET Email=:NEW.Email, Telefon=:NEW.Telefon, Scor_Credit=:NEW.Scor_Credit
+      WHERE ID_Client = :OLD.ID_Client;
+
+  ELSIF DELETING THEN
+    DELETE FROM CLIENTI_ID@BUCHAREST_LINK WHERE ID_Client = :OLD.ID_Client;
+    DELETE FROM CLIENTI_ID@CLUJ_LINK     WHERE ID_Client = :OLD.ID_Client;
+    DELETE FROM CLIENTI_PROFIL           WHERE ID_Client = :OLD.ID_Client;
+  END IF;
+END;
+/
+
+-- ============================================================
+-- T036/T037: trg_iof_conturi_global
+-- INSERT:  route by ID_Sucursala (1=B, 2=C), get remote sequence ID
+-- UPDATE:  same-fragment update; cross-fragment transfer = DELETE+INSERT
+-- DELETE:  remove from correct fragment
+-- ============================================================
+CREATE OR REPLACE TRIGGER trg_iof_conturi_global
+INSTEAD OF INSERT OR UPDATE OR DELETE ON CONTURI_GLOBAL
+FOR EACH ROW
+DECLARE
+  v_id NUMBER(10);
+BEGIN
+  IF INSERTING THEN
+    IF :NEW.ID_Sucursala = 1 THEN
+      SELECT SEQ_CONT_B.NEXTVAL@BUCHAREST_LINK INTO v_id FROM DUAL;
+      INSERT INTO CONTURI_B@BUCHAREST_LINK
+        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, NVL(:NEW.Sold, 0),
+                NVL(:NEW.Moneda, 'RON'), 1, :NEW.ID_Client);
+    ELSIF :NEW.ID_Sucursala = 2 THEN
+      SELECT SEQ_CONT_C.NEXTVAL@CLUJ_LINK INTO v_id FROM DUAL;
+      INSERT INTO CONTURI_C@CLUJ_LINK
+        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, NVL(:NEW.Sold, 0),
+                NVL(:NEW.Moneda, 'RON'), 2, :NEW.ID_Client);
+    END IF;
+
+  ELSIF UPDATING THEN
+    IF :OLD.ID_Sucursala = 1 AND :NEW.ID_Sucursala = 1 THEN
+      UPDATE CONTURI_B@BUCHAREST_LINK
+        SET IBAN=:NEW.IBAN, ID_Tip=:NEW.ID_Tip, Sold=:NEW.Sold, Moneda=:NEW.Moneda
+        WHERE ID_Cont = :OLD.ID_Cont;
+    ELSIF :OLD.ID_Sucursala = 2 AND :NEW.ID_Sucursala = 2 THEN
+      UPDATE CONTURI_C@CLUJ_LINK
+        SET IBAN=:NEW.IBAN, ID_Tip=:NEW.ID_Tip, Sold=:NEW.Sold, Moneda=:NEW.Moneda
+        WHERE ID_Cont = :OLD.ID_Cont;
+    ELSIF :OLD.ID_Sucursala = 1 AND :NEW.ID_Sucursala = 2 THEN
+      -- Transfer B → C: delete from Bucharest, insert into Cluj
+      DELETE FROM CONTURI_B@BUCHAREST_LINK WHERE ID_Cont = :OLD.ID_Cont;
+      SELECT SEQ_CONT_C.NEXTVAL@CLUJ_LINK INTO v_id FROM DUAL;
+      INSERT INTO CONTURI_C@CLUJ_LINK
+        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, :NEW.Sold, :NEW.Moneda, 2, :NEW.ID_Client);
+    ELSIF :OLD.ID_Sucursala = 2 AND :NEW.ID_Sucursala = 1 THEN
+      -- Transfer C → B: delete from Cluj, insert into Bucharest
+      DELETE FROM CONTURI_C@CLUJ_LINK WHERE ID_Cont = :OLD.ID_Cont;
+      SELECT SEQ_CONT_B.NEXTVAL@BUCHAREST_LINK INTO v_id FROM DUAL;
+      INSERT INTO CONTURI_B@BUCHAREST_LINK
+        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, :NEW.Sold, :NEW.Moneda, 1, :NEW.ID_Client);
+    END IF;
+
+  ELSIF DELETING THEN
+    IF :OLD.ID_Sucursala = 1 THEN
+      DELETE FROM CONTURI_B@BUCHAREST_LINK WHERE ID_Cont = :OLD.ID_Cont;
+    ELSE
+      DELETE FROM CONTURI_C@CLUJ_LINK WHERE ID_Cont = :OLD.ID_Cont;
+    END IF;
+  END IF;
+END;
+/
+
+-- ============================================================
+-- TRANZACTII_GLOBAL INSTEAD OF trigger
+-- Routing: ID_Cont_Sursa < 1000000 → Bucharest; else Cluj
+-- ============================================================
+CREATE OR REPLACE TRIGGER trg_iof_tranzactii_global
+INSTEAD OF INSERT OR UPDATE OR DELETE ON TRANZACTII_GLOBAL
+FOR EACH ROW
+DECLARE
+  v_id NUMBER(10);
+BEGIN
+  IF INSERTING THEN
+    IF :NEW.ID_Cont_Sursa < 1000000 THEN
+      SELECT SEQ_TRANZ_B.NEXTVAL@BUCHAREST_LINK INTO v_id FROM DUAL;
+      INSERT INTO TRANZACTII_B@BUCHAREST_LINK
+        (ID_Tranzactie, Data, Suma, Tip_Tranzactie, ID_Cont_Sursa)
+        VALUES (v_id, NVL(:NEW.Data, SYSDATE), :NEW.Suma, :NEW.Tip_Tranzactie, :NEW.ID_Cont_Sursa);
+    ELSE
+      SELECT SEQ_TRANZ_C.NEXTVAL@CLUJ_LINK INTO v_id FROM DUAL;
+      INSERT INTO TRANZACTII_C@CLUJ_LINK
+        (ID_Tranzactie, Data, Suma, Tip_Tranzactie, ID_Cont_Sursa)
+        VALUES (v_id, NVL(:NEW.Data, SYSDATE), :NEW.Suma, :NEW.Tip_Tranzactie, :NEW.ID_Cont_Sursa);
+    END IF;
+
+  ELSIF UPDATING THEN
+    IF :OLD.ID_Cont_Sursa < 1000000 THEN
+      UPDATE TRANZACTII_B@BUCHAREST_LINK
+        SET Data=:NEW.Data, Suma=:NEW.Suma, Tip_Tranzactie=:NEW.Tip_Tranzactie
+        WHERE ID_Tranzactie = :OLD.ID_Tranzactie;
+    ELSE
+      UPDATE TRANZACTII_C@CLUJ_LINK
+        SET Data=:NEW.Data, Suma=:NEW.Suma, Tip_Tranzactie=:NEW.Tip_Tranzactie
+        WHERE ID_Tranzactie = :OLD.ID_Tranzactie;
+    END IF;
+
+  ELSIF DELETING THEN
+    IF :OLD.ID_Cont_Sursa < 1000000 THEN
+      DELETE FROM TRANZACTII_B@BUCHAREST_LINK WHERE ID_Tranzactie = :OLD.ID_Tranzactie;
+    ELSE
+      DELETE FROM TRANZACTII_C@CLUJ_LINK WHERE ID_Tranzactie = :OLD.ID_Tranzactie;
+    END IF;
+  END IF;
+END;
+/
+
+-- ============================================================
+-- T033: Verify S1 — insert new client via CLIENTI_GLOBAL
+-- ============================================================
+INSERT INTO CLIENTI_GLOBAL (Nume, Prenume, CNP, Email, Telefon, Scor_Credit)
+VALUES ('Test', 'Global', '1990101400999', 'test.global@bank.ro', '0799000001', 650);
+SELECT ID_Client, Nume, Prenume, Scor_Credit FROM CLIENTI_GLOBAL
+  WHERE CNP = '1990101400999';
+-- Verify both nodes received the row:
+SELECT ID_Client FROM CLIENTI_ID@BUCHAREST_LINK WHERE CNP = '1990101400999';
+SELECT ID_Client FROM CLIENTI_ID@CLUJ_LINK     WHERE CNP = '1990101400999';
+ROLLBACK;
+
+-- ============================================================
+-- T040: Verify S2 — account transfer between branches
+-- ============================================================
+-- Insert a new account at Bucharest
+INSERT INTO CONTURI_GLOBAL (IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+VALUES ('RO49GLOBTEST00000000001', 1, 1000, 'RON', 1, 1);
+COMMIT;
+-- Confirm it's in Bucharest fragment:
+SELECT ID_Cont, IBAN, ID_Sucursala, Nod FROM CONTURI_GLOBAL
+  WHERE IBAN = 'RO49GLOBTEST00000000001';
+-- Transfer to Cluj by updating ID_Sucursala:
+UPDATE CONTURI_GLOBAL SET ID_Sucursala = 2 WHERE IBAN = 'RO49GLOBTEST00000000001';
+COMMIT;
+-- Confirm it moved to Cluj fragment:
+SELECT ID_Cont, IBAN, ID_Sucursala, Nod FROM CONTURI_GLOBAL
+  WHERE IBAN = 'RO49GLOBTEST00000000001';
+-- Cleanup test data:
+DELETE FROM CONTURI_GLOBAL WHERE IBAN = 'RO49GLOBTEST00000000001';
+COMMIT;
+
+========================================================
+FILE: sql/global/05-constraints.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T038-T039, T046-T048: Integrity Constraints
+-- Run as GLOBAL_USER on bankdb_high
+-- ============================================================
+
+-- ============================================================
+-- T039/T046: Constraint categories present in this schema
+-- ============================================================
+-- 1. PRIMARY KEY: Every table has a PK (ID_* columns)
+--    Example: CONTURI_B.ID_Cont PRIMARY KEY
+--
+-- 2. FOREIGN KEY (local, within fragment):
+--    CONTURI_B.ID_Tip  → TIPURI_CONT.ID_Tip      (local on ATP2)
+--    CONTURI_B.ID_Client → CLIENTI_ID.ID_Client  (local on ATP2)
+--    PLATI_RATE.ID_Credit → CREDITE.ID_Credit    (local on ATP1)
+--
+-- 3. CHECK constraints (domain integrity):
+--    CONTURI_B: ID_Sucursala = 1 (fragment purity)
+--    CONTURI_C: ID_Sucursala = 2 (fragment purity)
+--    TRANZACTII: Tip_Tranzactie IN ('DEBIT','CREDIT','TRANSFER')
+--    TIPURI_CONT: Dobanda BETWEEN 0 AND 100
+--    CLIENTI_PROFIL: Scor_Credit BETWEEN 0 AND 999
+--
+-- 4. UNIQUE: IBAN, CNP, Denumire, Email — each is globally unique
+--
+-- 5. Cross-node FK (enforced via triggers, not DDL — cross-instance):
+--    CREDITE.ID_Client  → CLIENTI_ID on local nodes  (see T045)
+--    CONTURI.ID_Client  → CLIENTI_ID on local nodes  (validated in INSTEAD OF trigger)
+-- ============================================================
+
+-- ============================================================
+-- T038: Cross-node FK for CONTURI — validated inline in
+-- trg_iof_conturi_global (04-transparency.sql).
+-- As an additional safety net, enforce locally for direct inserts:
+-- this trigger runs on CONTURI_GLOBAL (global view layer).
+-- Direct inserts to CONTURI_B/C on ATP2 are protected by the
+-- local FK: CONTURI_B.ID_Client → CLIENTI_ID.ID_Client
+-- ============================================================
+
+-- ============================================================
+-- T047: Verify S4 — local INSERT visible via global view
+-- ============================================================
+-- Insert directly into Bucharest local fragment
+INSERT INTO CONTURI_B@BUCHAREST_LINK
+  (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+VALUES (SEQ_CONT_B.NEXTVAL@BUCHAREST_LINK,
+        'RO49GLOBVERIF00000001', 1, 500.00, 'RON', 1, 1);
+COMMIT;
+-- Verify it appears in the global view
+SELECT ID_Cont, IBAN, Nod FROM CONTURI_GLOBAL
+  WHERE IBAN = 'RO49GLOBVERIF00000001';
+-- Clean up
+DELETE FROM CONTURI_B@BUCHAREST_LINK WHERE IBAN = 'RO49GLOBVERIF00000001';
+COMMIT;
+
+-- ============================================================
+-- T048: Verify S5 — INSERT via CLIENTI_GLOBAL propagates to both nodes
+-- ============================================================
+INSERT INTO CLIENTI_GLOBAL (Nume, Prenume, CNP, Email, Telefon, Scor_Credit)
+VALUES ('Verif', 'Test', '5000101410001', 'verif.test@bank.ro', '0700000001', 700);
+COMMIT;
+-- Confirm presence in both local CLIENTI_ID tables
+SELECT ID_Client, Nume FROM CLIENTI_ID@BUCHAREST_LINK WHERE CNP = '5000101410001';
+SELECT ID_Client, Nume FROM CLIENTI_ID@CLUJ_LINK     WHERE CNP = '5000101410001';
+-- Clean up
+DELETE FROM CLIENTI_GLOBAL WHERE CNP = '5000101410001';
+COMMIT;
+
+========================================================
+FILE: sql/global/06-optimization.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T041-T044: Complex Query + Optimization
+-- Run as GLOBAL_USER on bankdb_high
+-- NOTE: T041-T043 queries require DB Links to be working
+-- T044 index creation runs locally (no DB Links needed)
+-- ============================================================
+
+-- ============================================================
+-- T044 (run first — no DB Links required):
+-- Index on CLIENTI_PROFIL.Scor_Credit to accelerate the
+-- filter condition in the complex analytical query
+-- ============================================================
+BEGIN EXECUTE IMMEDIATE 'DROP INDEX idx_clienti_profil_scor'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+CREATE INDEX idx_clienti_profil_scor ON CLIENTI_PROFIL(Scor_Credit);
+
+-- Additional local indexes for join acceleration
+BEGIN EXECUTE IMMEDIATE 'DROP INDEX idx_credite_client'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+CREATE INDEX idx_credite_client ON CREDITE(ID_Client);
+
+BEGIN EXECUTE IMMEDIATE 'DROP INDEX idx_plati_credit'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+CREATE INDEX idx_plati_credit ON PLATI_RATE(ID_Credit);
+
+-- ============================================================
+-- T041: Complex query (S3) — total transaction amount by clients
+-- with Scor_Credit > 700, joining all three global views.
+-- ============================================================
+SELECT c.ID_Client,
+       c.Nume       || ' ' || c.Prenume AS Nume_Complet,
+       c.Scor_Credit,
+       COUNT(t.ID_Tranzactie)           AS Nr_Tranzactii,
+       SUM(t.Suma)                      AS Total_Tranzactat,
+       SUM(co.Sold)                     AS Sold_Total
+FROM   CLIENTI_GLOBAL    c
+JOIN   CONTURI_GLOBAL    co ON c.ID_Client     = co.ID_Client
+JOIN   TRANZACTII_GLOBAL t  ON co.ID_Cont      = t.ID_Cont_Sursa
+WHERE  c.Scor_Credit > 700
+GROUP BY c.ID_Client, c.Nume, c.Prenume, c.Scor_Credit
+ORDER BY Total_Tranzactat DESC;
+
+-- ============================================================
+-- T042: Rule-based optimizer plan (hint-forced)
+-- ============================================================
+SELECT /*+ RULE */
+       c.ID_Client, c.Scor_Credit,
+       COUNT(t.ID_Tranzactie) AS Nr_Tranzactii,
+       SUM(t.Suma)            AS Total_Tranzactat
+FROM   CLIENTI_GLOBAL    c
+JOIN   CONTURI_GLOBAL    co ON c.ID_Client  = co.ID_Client
+JOIN   TRANZACTII_GLOBAL t  ON co.ID_Cont   = t.ID_Cont_Sursa
+WHERE  c.Scor_Credit > 700
+GROUP BY c.ID_Client, c.Scor_Credit
+ORDER BY Total_Tranzactat DESC;
+
+-- ============================================================
+-- T043: Cost-based optimizer EXPLAIN PLAN
+-- ============================================================
+EXPLAIN PLAN FOR
+  SELECT c.ID_Client, c.Scor_Credit,
+         COUNT(t.ID_Tranzactie) AS Nr_Tranzactii,
+         SUM(t.Suma)            AS Total_Tranzactat
+  FROM   CLIENTI_GLOBAL    c
+  JOIN   CONTURI_GLOBAL    co ON c.ID_Client = co.ID_Client
+  JOIN   TRANZACTII_GLOBAL t  ON co.ID_Cont  = t.ID_Cont_Sursa
+  WHERE  c.Scor_Credit > 700
+  GROUP BY c.ID_Client, c.Scor_Credit
+  ORDER BY Total_Tranzactat DESC;
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+
+-- Local-only analytical query (no DB Links — runs against Central data):
+SELECT 'Clients with Scor_Credit > 700' AS query_label,
+       COUNT(*)                          AS nr_clienti
+FROM   CLIENTI_PROFIL
+WHERE  Scor_Credit > 700;
+
+SELECT cp.ID_Client, cp.Scor_Credit,
+       SUM(c.Suma_Totala) AS Total_Creditat,
+       COUNT(c.ID_Credit) AS Nr_Credite
+FROM   CLIENTI_PROFIL cp
+JOIN   CREDITE        c  ON c.ID_Client = cp.ID_Client
+WHERE  cp.Scor_Credit > 700
+GROUP BY cp.ID_Client, cp.Scor_Credit
+ORDER BY Total_Creditat DESC;
+
+========================================================
+FILE: sql/global/07-cross-node-fk.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T045: Cross-Node FK Enforcement Triggers
+-- Run as GLOBAL_USER on bankdb_high
+-- NOTE: Requires DB Links (BUCHAREST_LINK) to be working
+-- ============================================================
+
+-- Drop existing trigger (idempotent)
+BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER trg_bef_ins_credite'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- ============================================================
+-- T045: BEFORE INSERT on CREDITE — verify ID_Client exists
+-- in local CLIENTI_ID (cross-node FK from Central to ATP2)
+-- ============================================================
+CREATE OR REPLACE TRIGGER trg_bef_ins_credite
+BEFORE INSERT ON CREDITE
+FOR EACH ROW
+DECLARE
+  v_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO v_count
+  FROM   CLIENTI_ID@BUCHAREST_LINK
+  WHERE  ID_Client = :NEW.ID_Client;
+  IF v_count = 0 THEN
+    RAISE_APPLICATION_ERROR(-20001,
+      'ID_Client ' || :NEW.ID_Client || ' nu exista in CLIENTI_ID');
+  END IF;
+END;
+/
+
+========================================================
+FILE: sql/global/08-replication.sql
+========================================================
+-- ============================================================
+-- GlobalBank DB — T028, T049-T050: TIPURI_CONT Replication
+-- Run as GLOBAL_USER on bankdb_high
+-- NOTE: Requires DB Links (BUCHAREST_LINK, CLUJ_LINK) to be working
+-- ============================================================
+
+-- Drop existing trigger (idempotent)
+BEGIN EXECUTE IMMEDIATE 'DROP TRIGGER trg_replicate_tipuri_cont'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- ============================================================
+-- T028: Initial sync — push existing TIPURI_CONT master data
+-- to both slave nodes (idempotent via MERGE)
+-- ============================================================
+MERGE INTO TIPURI_CONT@BUCHAREST_LINK dst
+USING TIPURI_CONT src ON (dst.ID_Tip = src.ID_Tip)
+WHEN MATCHED     THEN UPDATE SET dst.Denumire = src.Denumire, dst.Dobanda = src.Dobanda
+WHEN NOT MATCHED THEN INSERT (ID_Tip, Denumire, Dobanda) VALUES (src.ID_Tip, src.Denumire, src.Dobanda);
+
+MERGE INTO TIPURI_CONT@CLUJ_LINK dst
+USING TIPURI_CONT src ON (dst.ID_Tip = src.ID_Tip)
+WHEN MATCHED     THEN UPDATE SET dst.Denumire = src.Denumire, dst.Dobanda = src.Dobanda
+WHEN NOT MATCHED THEN INSERT (ID_Tip, Denumire, Dobanda) VALUES (src.ID_Tip, src.Denumire, src.Dobanda);
+
+COMMIT;
+
+-- ============================================================
+-- T049: trg_replicate_tipuri_cont
+-- After any DML on the Central master TIPURI_CONT,
+-- propagate the change to both slave copies via DB Links.
+-- ============================================================
+CREATE OR REPLACE TRIGGER trg_replicate_tipuri_cont
+AFTER INSERT OR UPDATE OR DELETE ON TIPURI_CONT
+FOR EACH ROW
+BEGIN
+  IF INSERTING THEN
+    INSERT INTO TIPURI_CONT@BUCHAREST_LINK (ID_Tip, Denumire, Dobanda)
+      VALUES (:NEW.ID_Tip, :NEW.Denumire, :NEW.Dobanda);
+    INSERT INTO TIPURI_CONT@CLUJ_LINK (ID_Tip, Denumire, Dobanda)
+      VALUES (:NEW.ID_Tip, :NEW.Denumire, :NEW.Dobanda);
+
+  ELSIF UPDATING THEN
+    UPDATE TIPURI_CONT@BUCHAREST_LINK
+      SET Denumire = :NEW.Denumire, Dobanda = :NEW.Dobanda
+      WHERE ID_Tip = :OLD.ID_Tip;
+    UPDATE TIPURI_CONT@CLUJ_LINK
+      SET Denumire = :NEW.Denumire, Dobanda = :NEW.Dobanda
+      WHERE ID_Tip = :OLD.ID_Tip;
+
+  ELSIF DELETING THEN
+    DELETE FROM TIPURI_CONT@BUCHAREST_LINK WHERE ID_Tip = :OLD.ID_Tip;
+    DELETE FROM TIPURI_CONT@CLUJ_LINK     WHERE ID_Tip = :OLD.ID_Tip;
+  END IF;
+END;
+/
+
+-- ============================================================
+-- T050: Verify S6 — insert a new account type on Central,
+-- confirm it appears on both slave nodes
+-- ============================================================
+-- INSERT INTO TIPURI_CONT VALUES (5, 'Pensie', 2.50);
+-- COMMIT;
+-- SELECT ID_Tip, Denumire, Dobanda FROM TIPURI_CONT;
+-- SELECT ID_Tip, Denumire, Dobanda FROM TIPURI_CONT@BUCHAREST_LINK;
+-- SELECT ID_Tip, Denumire, Dobanda FROM TIPURI_CONT@CLUJ_LINK;
+-- ROLLBACK;
+
+========================================================
+FILE: app/db.py
+========================================================
+"""Oracle connection helper — thin mode (no Oracle Client required)."""
+
+import os
+import oracledb
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+
+
+def _connect(user, password, dsn, wallet_dir, wallet_password=None):
+    wallet_dir = os.path.expandvars(wallet_dir)
+    kwargs = {
+        'user': user,
+        'password': password,
+        'dsn': dsn,
+        'config_dir': wallet_dir,
+        'wallet_location': wallet_dir,
+    }
+    if wallet_password:
+        kwargs['wallet_password'] = wallet_password
+    return oracledb.connect(**kwargs)
+
+
+def get_global_conn():
+    """Connect as GLOBAL_USER on ATP1 (bankdb_high) — Central node."""
+    return _connect(
+        user=os.environ['GLOBAL_SCHEMA_USER'],
+        password=os.environ['GLOBAL_SCHEMA_PASSWORD'],
+        dsn=os.environ['GLOBAL_TNS_ALIAS'],
+        wallet_dir=os.environ['GLOBAL_WALLET_DIR'],
+        wallet_password=os.environ.get('WALLET_PASSWORD'),
+    )
+
+
+def _connect_tls(user, password, dsn):
+    """Direct TLS connection (port 1521) — no wallet required when mTLS is disabled."""
+    return oracledb.connect(user=user, password=password, dsn=dsn)
+
+
+def get_bucharest_conn():
+    """Connect as BUCHAREST_USER on ATP2 — Bucharest fragment."""
+    tls_dsn = os.environ.get('LOCAL_TLS_DSN')
+    if tls_dsn:
+        return _connect_tls(
+            user=os.environ['BUCHAREST_SCHEMA_USER'],
+            password=os.environ['BUCHAREST_SCHEMA_PASSWORD'],
+            dsn=tls_dsn,
+        )
+    return _connect(
+        user=os.environ['BUCHAREST_SCHEMA_USER'],
+        password=os.environ['BUCHAREST_SCHEMA_PASSWORD'],
+        dsn=os.environ['LOCAL_TNS_ALIAS'],
+        wallet_dir=os.environ['LOCAL_WALLET_DIR'],
+        wallet_password=os.environ.get('LOCAL_WALLET_PASSWORD'),
+    )
+
+
+def get_cluj_conn():
+    """Connect as CLUJ_USER on ATP2 — Cluj fragment."""
+    tls_dsn = os.environ.get('LOCAL_TLS_DSN')
+    if tls_dsn:
+        return _connect_tls(
+            user=os.environ['CLUJ_SCHEMA_USER'],
+            password=os.environ['CLUJ_SCHEMA_PASSWORD'],
+            dsn=tls_dsn,
+        )
+    return _connect(
+        user=os.environ['CLUJ_SCHEMA_USER'],
+        password=os.environ['CLUJ_SCHEMA_PASSWORD'],
+        dsn=os.environ['LOCAL_TNS_ALIAS'],
+        wallet_dir=os.environ['LOCAL_WALLET_DIR'],
+        wallet_password=os.environ.get('LOCAL_WALLET_PASSWORD'),
+    )
+
+
+def get_branch_conn(branch):
+    if branch == 'bucharest':
+        return get_bucharest_conn()
+    elif branch == 'cluj':
+        return get_cluj_conn()
+    raise ValueError(f'Unknown branch: {branch}')
+
+
+def query(conn, sql, params=None):
+    """Return list of dicts from a SELECT query."""
+    with conn.cursor() as cur:
+        cur.execute(sql, params or [])
+        cols = [d[0].lower() for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def execute(conn, sql, params=None):
+    """Execute a DML statement and commit."""
+    with conn.cursor() as cur:
+        cur.execute(sql, params or [])
+    conn.commit()
+
+========================================================
+FILE: app/app.py
+========================================================
+from flask import Flask, render_template, request, redirect, url_for, flash
+from db import (
+    get_global_conn, get_bucharest_conn, get_cluj_conn,
+    get_branch_conn, query, execute,
+)
+
+app = Flask(__name__)
+app.secret_key = 'globalbank-dev'
+
+BRANCHES = {
+    'bucharest': {'label': 'Bucuresti', 'id_sucursala': 1},
+    'cluj':      {'label': 'Cluj',      'id_sucursala': 2},
+}
+
+
+# ── Home ────────────────────────────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+# ── FR-APP-01: Local node view ───────────────────────────────────────────────
+
+@app.route('/local/<branch>')
+def local_view(branch):
+    if branch not in BRANCHES:
+        return 'Unknown branch', 404
+    meta = BRANCHES[branch]
+    suffix = 'B' if branch == 'bucharest' else 'C'
+
+    conn = get_branch_conn(branch)
+    try:
+        conturi    = query(conn, f'SELECT * FROM CONTURI_{suffix} ORDER BY ID_Cont')
+        tranzactii = query(conn, f'SELECT * FROM TRANZACTII_{suffix} ORDER BY Data DESC FETCH FIRST 20 ROWS ONLY')
+        clienti    = query(conn, 'SELECT * FROM CLIENTI_ID ORDER BY ID_Client')
+    finally:
+        conn.close()
+
+    return render_template('local.html',
+                           branch=branch, meta=meta, suffix=suffix,
+                           conturi=conturi, tranzactii=tranzactii, clienti=clienti)
+
+
+@app.route('/local/<branch>/cont/add', methods=['POST'])
+def add_cont(branch):
+    if branch not in BRANCHES:
+        return 'Unknown branch', 404
+    meta = BRANCHES[branch]
+    suffix = 'B' if branch == 'bucharest' else 'C'
+    seq   = f'SEQ_CONT_{suffix}'
+
+    conn = get_branch_conn(branch)
+    try:
+        execute(conn,
+            f"""INSERT INTO CONTURI_{suffix}
+                  (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+                VALUES ({seq}.NEXTVAL, :iban, :id_tip, :sold, :moneda, :suc, :client)""",
+            {
+                'iban':   request.form['iban'],
+                'id_tip': int(request.form['id_tip']),
+                'sold':   float(request.form.get('sold', 0)),
+                'moneda': request.form.get('moneda', 'RON'),
+                'suc':    meta['id_sucursala'],
+                'client': int(request.form['id_client']),
+            })
+        flash('Cont adaugat cu succes.', 'success')
+    except Exception as e:
+        flash(f'Eroare: {e}', 'danger')
+    finally:
+        conn.close()
+    return redirect(url_for('local_view', branch=branch))
+
+
+@app.route('/local/<branch>/cont/<int:cont_id>/delete', methods=['POST'])
+def delete_cont(branch, cont_id):
+    if branch not in BRANCHES:
+        return 'Unknown branch', 404
+    suffix = 'B' if branch == 'bucharest' else 'C'
+    conn = get_branch_conn(branch)
+    try:
+        execute(conn, f'DELETE FROM CONTURI_{suffix} WHERE ID_Cont = :id', {'id': cont_id})
+        flash('Cont sters.', 'success')
+    except Exception as e:
+        flash(f'Eroare: {e}', 'danger')
+    finally:
+        conn.close()
+    return redirect(url_for('local_view', branch=branch))
+
+
+@app.route('/local/<branch>/tranzactie/add', methods=['POST'])
+def add_tranzactie(branch):
+    if branch not in BRANCHES:
+        return 'Unknown branch', 404
+    suffix = 'B' if branch == 'bucharest' else 'C'
+    seq   = f'SEQ_TRANZ_{suffix}'
+    conn = get_branch_conn(branch)
+    try:
+        execute(conn,
+            f"""INSERT INTO TRANZACTII_{suffix}
+                  (ID_Tranzactie, Data, Suma, Tip_Tranzactie, ID_Cont_Sursa)
+                VALUES ({seq}.NEXTVAL, SYSDATE, :suma, :tip, :cont)""",
+            {
+                'suma': float(request.form['suma']),
+                'tip':  request.form['tip_tranzactie'],
+                'cont': int(request.form['id_cont']),
+            })
+        flash('Tranzactie adaugata.', 'success')
+    except Exception as e:
+        flash(f'Eroare: {e}', 'danger')
+    finally:
+        conn.close()
+    return redirect(url_for('local_view', branch=branch))
+
+
+# ── FR-APP-02: Global view ───────────────────────────────────────────────────
+
+@app.route('/global')
+def global_view():
+    try:
+        conn = get_global_conn()
+        clienti = query(conn, 'SELECT * FROM CLIENTI_GLOBAL ORDER BY ID_Client')
+        conturi = query(conn, 'SELECT * FROM CONTURI_GLOBAL ORDER BY ID_Sucursala, ID_Cont')
+        totals  = query(conn,
+            """SELECT ID_Sucursala,
+                      COUNT(*)    AS nr_conturi,
+                      SUM(Sold)   AS sold_total
+               FROM   CONTURI_GLOBAL
+               GROUP BY ID_Sucursala
+               ORDER BY ID_Sucursala""")
+        conn.close()
+        db_links_ok = True
+    except Exception as e:
+        clienti, conturi, totals = [], [], []
+        db_links_ok = False
+        flash(f'DB Links inactive: {e}', 'warning')
+
+    return render_template('global.html',
+                           clienti=clienti, conturi=conturi,
+                           totals=totals, db_links_ok=db_links_ok)
+
+
+# ── FR-APP-03: Local → Global transparency demo ──────────────────────────────
+
+@app.route('/demo/local-to-global', methods=['GET', 'POST'])
+def demo_local_to_global():
+    before_b, before_c, after_b, after_c = [], [], [], []
+    inserted = None
+
+    if request.method == 'POST':
+        branch = request.form['branch']
+        suffix = 'B' if branch == 'bucharest' else 'C'
+        meta   = BRANCHES[branch]
+        seq    = f'SEQ_CONT_{suffix}'
+
+        # Snapshot before
+        cb = get_bucharest_conn()
+        cc = get_cluj_conn()
+        before_b = query(cb, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_B ORDER BY ID_Cont')
+        before_c = query(cc, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_C ORDER BY ID_Cont')
+
+        # Insert directly into the local fragment
+        conn = get_branch_conn(branch)
+        try:
+            execute(conn,
+                f"""INSERT INTO CONTURI_{suffix}
+                      (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+                    VALUES ({seq}.NEXTVAL, :iban, 1, :sold, 'RON', :suc, :client)""",
+                {
+                    'iban':   request.form['iban'],
+                    'sold':   float(request.form.get('sold', 0)),
+                    'suc':    meta['id_sucursala'],
+                    'client': int(request.form['id_client']),
+                })
+            inserted = {'branch': branch, 'iban': request.form['iban']}
+        except Exception as e:
+            flash(f'Eroare insert local: {e}', 'danger')
+        finally:
+            conn.close()
+
+        # Snapshot after (same direct connections — no DB Link needed)
+        after_b = query(cb, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_B ORDER BY ID_Cont')
+        after_c = query(cc, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_C ORDER BY ID_Cont')
+        cb.close()
+        cc.close()
+
+    # Fetch clients for the form
+    try:
+        conn = get_bucharest_conn()
+        clienti = query(conn, 'SELECT ID_Client, Nume, Prenume FROM CLIENTI_ID ORDER BY ID_Client')
+        conn.close()
+    except Exception:
+        clienti = []
+
+    return render_template('demo_ltog.html',
+                           branches=BRANCHES,
+                           clienti=clienti,
+                           before_b=before_b, before_c=before_c,
+                           after_b=after_b,  after_c=after_c,
+                           inserted=inserted)
+
+
+# ── FR-APP-04: Global → Local fragmentation demo ─────────────────────────────
+
+@app.route('/demo/global-to-local', methods=['GET', 'POST'])
+def demo_global_to_local():
+    result_b, result_c, inserted_cnp = [], [], None
+    db_links_ok = True
+
+    if request.method == 'POST':
+        cnp = request.form['cnp']
+        try:
+            conn = get_global_conn()
+            execute(conn,
+                """INSERT INTO CLIENTI_GLOBAL
+                     (Nume, Prenume, CNP, Email, Telefon, Scor_Credit)
+                   VALUES (:nume, :prenume, :cnp, :email, :tel, :scor)""",
+                {
+                    'nume':    request.form['nume'],
+                    'prenume': request.form['prenume'],
+                    'cnp':     cnp,
+                    'email':   request.form['email'],
+                    'tel':     request.form.get('telefon', ''),
+                    'scor':    int(request.form.get('scor_credit', 500)),
+                })
+            conn.close()
+            inserted_cnp = cnp
+
+            # Verify propagation to both local nodes
+            cb = get_bucharest_conn()
+            cc = get_cluj_conn()
+            result_b = query(cb, 'SELECT * FROM CLIENTI_ID WHERE CNP = :cnp', {'cnp': cnp})
+            result_c = query(cc, 'SELECT * FROM CLIENTI_ID WHERE CNP = :cnp', {'cnp': cnp})
+            cb.close()
+            cc.close()
+        except Exception as e:
+            db_links_ok = False
+            flash(f'Eroare (DB Links necesare): {e}', 'danger')
+
+    return render_template('demo_gtol.html',
+                           db_links_ok=db_links_ok,
+                           result_b=result_b, result_c=result_c,
+                           inserted_cnp=inserted_cnp)
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+

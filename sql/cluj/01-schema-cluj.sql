@@ -1,0 +1,115 @@
+-- ============================================================
+-- GlobalBank DB — T021-T024: Cluj Node Schema
+-- Run as CLUJ_USER on globalbanklocal_high
+-- ============================================================
+
+-- Drop existing objects (idempotent — reverse dependency order)
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJAT_CLIENT_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CARDURI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TRANZACTII_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CONTURI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJATI_C CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTI_ID CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TIPURI_CONT CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENT_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CONT_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_TRANZ_C'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T021: TIPURI_CONT slave (kept in sync with Central master via replication trigger)
+CREATE TABLE TIPURI_CONT (
+    ID_Tip    NUMBER(4)    PRIMARY KEY,
+    Denumire  VARCHAR2(50) NOT NULL UNIQUE,
+    Dobanda   NUMBER(5,2)  NOT NULL,
+    CONSTRAINT chk_dobanda_c CHECK (Dobanda >= 0 AND Dobanda <= 100)
+);
+
+-- T021: CLIENTI_ID (identification fragment — holds all clients, replicated from both branches)
+-- Sequence range 1000000-1999999 for clients registered primarily at Cluj
+CREATE SEQUENCE SEQ_CLIENT_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CLIENTI_ID (
+    ID_Client  NUMBER(10)    PRIMARY KEY,
+    Nume       VARCHAR2(100) NOT NULL,
+    Prenume    VARCHAR2(100) NOT NULL,
+    CNP        CHAR(13)      NOT NULL UNIQUE,
+    CONSTRAINT chk_cnp_len_c CHECK (LENGTH(CNP) = 13)
+);
+
+-- T022: CONTURI_C (horizontal fragment — Cluj accounts only)
+CREATE SEQUENCE SEQ_CONT_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CONTURI_C (
+    ID_Cont      NUMBER(10)   PRIMARY KEY,
+    IBAN         VARCHAR2(34) NOT NULL UNIQUE,
+    ID_Tip       NUMBER(4)    NOT NULL,
+    Sold         NUMBER(15,2) DEFAULT 0,
+    Moneda       VARCHAR2(3)  DEFAULT 'RON',
+    ID_Sucursala NUMBER(4)    DEFAULT 2 NOT NULL,
+    ID_Client    NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_conturi_c_suc CHECK (ID_Sucursala = 2),
+    CONSTRAINT chk_moneda_c      CHECK (Moneda IN ('RON','EUR','USD')),
+    CONSTRAINT chk_sold_c        CHECK (Sold >= 0),
+    CONSTRAINT fk_conturi_c_cli  FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client),
+    CONSTRAINT fk_conturi_c_tip  FOREIGN KEY (ID_Tip)     REFERENCES TIPURI_CONT(ID_Tip)
+);
+
+-- T023: TRANZACTII_C (derived horizontal fragment — transactions for Cluj accounts)
+CREATE SEQUENCE SEQ_TRANZ_C START WITH 1000001 MAXVALUE 1999999 NOCACHE NOCYCLE;
+
+CREATE TABLE TRANZACTII_C (
+    ID_Tranzactie  NUMBER(10)   PRIMARY KEY,
+    Data           DATE         DEFAULT SYSDATE NOT NULL,
+    Suma           NUMBER(15,2) NOT NULL,
+    Tip_Tranzactie VARCHAR2(20) NOT NULL,
+    ID_Cont_Sursa  NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_tranz_c_suma CHECK (Suma > 0),
+    CONSTRAINT chk_tranz_c_tip  CHECK (Tip_Tranzactie IN ('DEBIT','CREDIT','TRANSFER')),
+    CONSTRAINT fk_tranz_c_cont  FOREIGN KEY (ID_Cont_Sursa) REFERENCES CONTURI_C(ID_Cont)
+);
+
+-- T024: CARDURI_C
+CREATE TABLE CARDURI_C (
+    ID_Card        NUMBER(10)   PRIMARY KEY,
+    Numar_Card     CHAR(16)     NOT NULL UNIQUE,
+    Data_Expirare  DATE         NOT NULL,
+    Status         VARCHAR2(10) DEFAULT 'ACTIV',
+    ID_Cont        NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_card_c_status CHECK (Status IN ('ACTIV','BLOCAT','EXPIRAT')),
+    CONSTRAINT fk_card_c_cont    FOREIGN KEY (ID_Cont) REFERENCES CONTURI_C(ID_Cont)
+);
+
+-- T024: ANGAJATI_C
+CREATE TABLE ANGAJATI_C (
+    ID_Angajat   NUMBER(10)    PRIMARY KEY,
+    Nume         VARCHAR2(100) NOT NULL,
+    Functie      VARCHAR2(50)  NOT NULL,
+    Salariu      NUMBER(10,2)  NOT NULL,
+    ID_Sucursala NUMBER(4)     DEFAULT 2 NOT NULL,
+    CONSTRAINT chk_ang_c_suc CHECK (ID_Sucursala = 2),
+    CONSTRAINT chk_ang_c_sal CHECK (Salariu > 0)
+);
+
+-- T024: ANGAJAT_CLIENT_C (M:N junction — employee manages client)
+CREATE TABLE ANGAJAT_CLIENT_C (
+    ID_Angajat    NUMBER(10)   NOT NULL,
+    ID_Client     NUMBER(10)   NOT NULL,
+    Rol           VARCHAR2(30) DEFAULT 'GESTIONAR',
+    Data_Asignare DATE         DEFAULT SYSDATE,
+    CONSTRAINT pk_ac_c     PRIMARY KEY (ID_Angajat, ID_Client),
+    CONSTRAINT fk_ac_c_ang FOREIGN KEY (ID_Angajat) REFERENCES ANGAJATI_C(ID_Angajat),
+    CONSTRAINT fk_ac_c_cli FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client)
+);
+
+COMMIT;
+
+SELECT 'Cluj schema created OK' AS status FROM DUAL;

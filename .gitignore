@@ -1,0 +1,9 @@
+.env
+*.zip
+__pycache__/
+*.pyc
+.idea/
+*.pdf
+assets/screenshots/
+app/.venv/
+.venv/

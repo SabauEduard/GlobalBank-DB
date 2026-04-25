@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank — Demo: Global → Local{% endblock %}
+{% block content %}
+<h1>Demo: Inserare Globala Rutatata Local</h1>
+<p>Demonstreaza doua tipuri de fragmentare: <strong>verticala</strong> (CLIENTI_GLOBAL → ambele
+   noduri locale) si <strong>orizontala</strong> (CONTURI_GLOBAL → fragmentul corespunzator sucursalei).</p>
+
+{% if not db_links_ok %}
+<div class="alert alert-warning">
+  <strong>Necesita DB Links active.</strong>
+  Activeaza TLS pe ATP2 in OCI Console pentru a testa aceasta functionalitate.
+</div>
+{% endif %}
+
+<h2>A. Fragmentare verticala — INSERT client via CLIENTI_GLOBAL</h2>
+<p>Trigger INSTEAD OF scrie simultan in <code>CLIENTI_ID@BUCHAREST_LINK</code>,
+   <code>CLIENTI_ID@CLUJ_LINK</code> si <code>CLIENTI_PROFIL</code> (central).</p>
+
+<form method="post" class="form-card">
+  <input type="hidden" name="demo_type" value="vertical">
+  <label>Nume     <input name="nume"    required placeholder="Exemplu"></label>
+  <label>Prenume  <input name="prenume" required placeholder="Test"></label>
+  <label>CNP      <input name="cnp" required pattern="\d{13}" placeholder="1234567890123" maxlength="13"></label>
+  <label>Email    <input name="email" type="email" required placeholder="test@bank.ro"></label>
+  <label>Telefon  <input name="telefon" placeholder="07XXXXXXXX"></label>
+  <label>Scor Credit <input name="scor_credit" type="number" min="0" max="999" value="500"></label>
+  <button class="btn" {% if not db_links_ok %}disabled title="DB Links inactive"{% endif %}>
+    Insereaza via CLIENTI_GLOBAL
+  </button>
+</form>
+
+{% if inserted_cnp %}
+<div class="alert alert-success">
+  Client cu CNP <strong>{{ inserted_cnp }}</strong> inserat via <code>CLIENTI_GLOBAL</code>.
+  Trigger INSTEAD OF a propagat datele de identificare la ambele noduri:
+</div>
+
+<div class="diff-view">
+  <div>
+    <h3>CLIENTI_ID@BUCHAREST</h3>
+    {% if result_b %}
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in result_b %}
+        <tr class="new-row">
+          <td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Nu s-a gasit (DB Links inactive).</p>
+    {% endif %}
+  </div>
+  <div>
+    <h3>CLIENTI_ID@CLUJ</h3>
+    {% if result_c %}
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in result_c %}
+        <tr class="new-row">
+          <td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>Nu s-a gasit (DB Links inactive).</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<hr>
+<h2>B. Fragmentare orizontala — INSERT cont via CONTURI_GLOBAL</h2>
+<p>Trigger INSTEAD OF ruteaza automat catre <code>CONTURI_B@BUCHAREST_LINK</code>
+   (ID_Sucursala=1) sau <code>CONTURI_C@CLUJ_LINK</code> (ID_Sucursala=2) in functie
+   de sucursala aleasa.</p>
+
+<form method="post" class="form-card">
+  <input type="hidden" name="demo_type" value="horizontal">
+  <label>IBAN <input name="iban" required placeholder="RO49GLOBDEMO000000000099"></label>
+  <label>Sold <input name="sold" type="number" step="0.01" value="500"></label>
+  <label>Sucursala
+    <select name="id_sucursala">
+      <option value="1">Bucuresti (ID=1) → CONTURI_B</option>
+      <option value="2">Cluj (ID=2) → CONTURI_C</option>
+    </select>
+  </label>
+  <label>Client
+    <select name="id_client">
+      {% for cl in clienti_global %}
+      <option value="{{ cl.id_client }}">{{ cl.id_client }} – {{ cl.nume }} {{ cl.prenume }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn" {% if not db_links_ok %}disabled title="DB Links inactive"{% endif %}>
+    Insereaza via CONTURI_GLOBAL
+  </button>
+</form>
+
+{% if inserted_iban %}
+<div class="alert alert-success">
+  Cont IBAN <strong>{{ inserted_iban }}</strong> inserat via <code>CONTURI_GLOBAL</code> —
+  trigger INSTEAD OF a rutat catre fragmentul local corespunzator sucursalei.
+</div>
+
+<div class="diff-view">
+  <div>
+    <h3>CONTURI_B (Bucuresti) — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in horiz_before_b %}<tr class="before"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in horiz_after_b %}<tr class="{% if r not in horiz_before_b %}new-row{% endif %}"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>CONTURI_C (Cluj) — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in horiz_before_c %}<tr class="before"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID_Cont</th><th>IBAN</th><th>Sucursala</th><th>Sold</th></tr></thead>
+      <tbody>
+        {% for r in horiz_after_c %}<tr class="{% if r not in horiz_before_c %}new-row{% endif %}"><td>{{ r.id_cont }}</td><td class="mono">{{ r.iban }}</td><td>{{ r.id_sucursala }}</td><td>{{ '%.2f'|format(r.sold) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

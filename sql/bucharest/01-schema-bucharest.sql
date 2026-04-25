@@ -1,0 +1,114 @@
+-- ============================================================
+-- GlobalBank DB — T015-T020: Bucharest Node Schema
+-- Run as BUCHAREST_USER on globalbanklocal_high
+-- ============================================================
+
+-- Drop existing objects (idempotent — reverse dependency order)
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJAT_CLIENT_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CARDURI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TRANZACTII_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CONTURI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE ANGAJATI_B CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE CLIENTI_ID CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP TABLE TIPURI_CONT CASCADE CONSTRAINTS'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CLIENT_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_CONT_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+BEGIN EXECUTE IMMEDIATE 'DROP SEQUENCE SEQ_TRANZ_B'; EXCEPTION WHEN OTHERS THEN NULL; END;
+/
+
+-- T015: TIPURI_CONT slave (kept in sync with Central master via replication trigger)
+CREATE TABLE TIPURI_CONT (
+    ID_Tip    NUMBER(4)    PRIMARY KEY,
+    Denumire  VARCHAR2(50) NOT NULL UNIQUE,
+    Dobanda   NUMBER(5,2)  NOT NULL,
+    CONSTRAINT chk_dobanda_b CHECK (Dobanda >= 0 AND Dobanda <= 100)
+);
+
+-- T015: CLIENTI_ID (identification fragment — holds all clients, replicated from both branches)
+CREATE SEQUENCE SEQ_CLIENT_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CLIENTI_ID (
+    ID_Client  NUMBER(10)    PRIMARY KEY,
+    Nume       VARCHAR2(100) NOT NULL,
+    Prenume    VARCHAR2(100) NOT NULL,
+    CNP        CHAR(13)      NOT NULL UNIQUE,
+    CONSTRAINT chk_cnp_len_b CHECK (LENGTH(CNP) = 13)
+);
+
+-- T016: CONTURI_B (horizontal fragment — Bucharest accounts only)
+CREATE SEQUENCE SEQ_CONT_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE CONTURI_B (
+    ID_Cont      NUMBER(10)   PRIMARY KEY,
+    IBAN         VARCHAR2(34) NOT NULL UNIQUE,
+    ID_Tip       NUMBER(4)    NOT NULL,
+    Sold         NUMBER(15,2) DEFAULT 0,
+    Moneda       VARCHAR2(3)  DEFAULT 'RON',
+    ID_Sucursala NUMBER(4)    DEFAULT 1 NOT NULL,
+    ID_Client    NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_conturi_b_suc CHECK (ID_Sucursala = 1),
+    CONSTRAINT chk_moneda_b      CHECK (Moneda IN ('RON','EUR','USD')),
+    CONSTRAINT chk_sold_b        CHECK (Sold >= 0),
+    CONSTRAINT fk_conturi_b_cli  FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client),
+    CONSTRAINT fk_conturi_b_tip  FOREIGN KEY (ID_Tip)     REFERENCES TIPURI_CONT(ID_Tip)
+);
+
+-- T017: TRANZACTII_B (derived horizontal fragment — transactions for Bucharest accounts)
+CREATE SEQUENCE SEQ_TRANZ_B START WITH 1 MAXVALUE 999999 NOCACHE NOCYCLE;
+
+CREATE TABLE TRANZACTII_B (
+    ID_Tranzactie  NUMBER(10)   PRIMARY KEY,
+    Data           DATE         DEFAULT SYSDATE NOT NULL,
+    Suma           NUMBER(15,2) NOT NULL,
+    Tip_Tranzactie VARCHAR2(20) NOT NULL,
+    ID_Cont_Sursa  NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_tranz_b_suma CHECK (Suma > 0),
+    CONSTRAINT chk_tranz_b_tip  CHECK (Tip_Tranzactie IN ('DEBIT','CREDIT','TRANSFER')),
+    CONSTRAINT fk_tranz_b_cont  FOREIGN KEY (ID_Cont_Sursa) REFERENCES CONTURI_B(ID_Cont)
+);
+
+-- T018: CARDURI_B
+CREATE TABLE CARDURI_B (
+    ID_Card        NUMBER(10)   PRIMARY KEY,
+    Numar_Card     CHAR(16)     NOT NULL UNIQUE,
+    Data_Expirare  DATE         NOT NULL,
+    Status         VARCHAR2(10) DEFAULT 'ACTIV',
+    ID_Cont        NUMBER(10)   NOT NULL,
+    CONSTRAINT chk_card_b_status CHECK (Status IN ('ACTIV','BLOCAT','EXPIRAT')),
+    CONSTRAINT fk_card_b_cont    FOREIGN KEY (ID_Cont) REFERENCES CONTURI_B(ID_Cont)
+);
+
+-- T019: ANGAJATI_B
+CREATE TABLE ANGAJATI_B (
+    ID_Angajat   NUMBER(10)    PRIMARY KEY,
+    Nume         VARCHAR2(100) NOT NULL,
+    Functie      VARCHAR2(50)  NOT NULL,
+    Salariu      NUMBER(10,2)  NOT NULL,
+    ID_Sucursala NUMBER(4)     DEFAULT 1 NOT NULL,
+    CONSTRAINT chk_ang_b_suc CHECK (ID_Sucursala = 1),
+    CONSTRAINT chk_ang_b_sal CHECK (Salariu > 0)
+);
+
+-- T020: ANGAJAT_CLIENT_B (M:N junction — employee manages client)
+CREATE TABLE ANGAJAT_CLIENT_B (
+    ID_Angajat    NUMBER(10)   NOT NULL,
+    ID_Client     NUMBER(10)   NOT NULL,
+    Rol           VARCHAR2(30) DEFAULT 'GESTIONAR',
+    Data_Asignare DATE         DEFAULT SYSDATE,
+    CONSTRAINT pk_ac_b     PRIMARY KEY (ID_Angajat, ID_Client),
+    CONSTRAINT fk_ac_b_ang FOREIGN KEY (ID_Angajat) REFERENCES ANGAJATI_B(ID_Angajat),
+    CONSTRAINT fk_ac_b_cli FOREIGN KEY (ID_Client)  REFERENCES CLIENTI_ID(ID_Client)
+);
+
+COMMIT;
+
+SELECT 'Bucharest schema created OK' AS status FROM DUAL;

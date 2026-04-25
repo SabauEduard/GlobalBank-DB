@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}GlobalBank — {{ meta.label }}{% endblock %}
+{% block content %}
+<h1>Nod {{ meta.label }}</h1>
+<p class="sub">Fragment orizontal — CONTURI_{{ suffix }}, TRANZACTII_{{ suffix }}</p>
+
+<section>
+  <h2>Conturi ({{ conturi|length }})</h2>
+  {% if conturi %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>IBAN</th><th>Tip</th><th>Sold</th><th>Moneda</th><th>Client</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in conturi %}
+      <tr>
+        <td>{{ c.id_cont }}</td>
+        <td class="mono">{{ c.iban }}</td>
+        <td>{{ c.id_tip }}</td>
+        <td class="num">{{ '%.2f'|format(c.sold) }}</td>
+        <td>{{ c.moneda }}</td>
+        <td>{{ c.id_client }}</td>
+        <td>
+          <form method="post" action="{{ url_for('delete_cont', branch=branch, cont_id=c.id_cont) }}"
+                onsubmit="return confirm('Stergi contul {{ c.id_cont }}?')">
+            <button class="btn btn-sm btn-danger">Sterge</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Niciun cont.</p>
+  {% endif %}
+
+  <details>
+    <summary>Adauga cont nou</summary>
+    <form method="post" action="{{ url_for('add_cont', branch=branch) }}" class="form-inline">
+      <label>IBAN <input name="iban" required placeholder="RO49GLOB..."></label>
+      <label>Tip cont
+        <select name="id_tip">
+          <option value="1">1 – Curent</option>
+          <option value="2">2 – Economii</option>
+          <option value="3">3 – Depozit</option>
+          <option value="4">4 – Credit</option>
+        </select>
+      </label>
+      <label>Sold initial <input name="sold" type="number" step="0.01" value="0"></label>
+      <label>Moneda
+        <select name="moneda"><option>RON</option><option>EUR</option><option>USD</option></select>
+      </label>
+      <label>Client
+        <select name="id_client">
+          {% for cl in clienti %}
+          <option value="{{ cl.id_client }}">{{ cl.id_client }} – {{ cl.nume }} {{ cl.prenume }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn">Adauga</button>
+    </form>
+  </details>
+</section>
+
+<section>
+  <h2>Tranzactii recente ({{ tranzactii|length }})</h2>
+  {% if tranzactii %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Data</th><th>Suma</th><th>Tip</th><th>ID Cont</th></tr>
+    </thead>
+    <tbody>
+      {% for t in tranzactii %}
+      <tr>
+        <td>{{ t.id_tranzactie }}</td>
+        <td>{{ t.data }}</td>
+        <td class="num">{{ '%.2f'|format(t.suma) }}</td>
+        <td><span class="badge badge-{{ t.tip_tranzactie|lower }}">{{ t.tip_tranzactie }}</span></td>
+        <td>{{ t.id_cont_sursa }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Nicio tranzactie.</p>
+  {% endif %}
+
+  <details>
+    <summary>Adauga tranzactie noua</summary>
+    <form method="post" action="{{ url_for('add_tranzactie', branch=branch) }}" class="form-inline">
+      <label>Cont
+        <select name="id_cont">
+          {% for c in conturi %}
+          <option value="{{ c.id_cont }}">{{ c.id_cont }} ({{ c.iban[-8:] }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Suma <input name="suma" type="number" step="0.01" required min="0.01"></label>
+      <label>Tip
+        <select name="tip_tranzactie">
+          <option>CREDIT</option><option>DEBIT</option><option>TRANSFER</option>
+        </select>
+      </label>
+      <button class="btn">Adauga</button>
+    </form>
+  </details>
+</section>
+{% endblock %}
