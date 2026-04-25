@@ -1,4 +1,9 @@
-"""Oracle connection helper — thin mode (no Oracle Client required)."""
+"""Oracle connection helper — thin mode (no Oracle Client required).
+
+Supports two modes via DB_MODE env var:
+  docker  — plain TCP connections to local Docker containers
+  atp     — mTLS wallet connections to Oracle ATP Free Tier (default)
+"""
 
 import os
 import oracledb
@@ -6,8 +11,14 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
+_MODE = os.environ.get('DB_MODE', 'atp')
 
-def _connect(user, password, dsn, wallet_dir, wallet_password=None):
+
+def _connect_plain(user, password, dsn):
+    return oracledb.connect(user=user, password=password, dsn=dsn)
+
+
+def _connect_wallet(user, password, dsn, wallet_dir, wallet_password=None):
     wallet_dir = os.path.expandvars(wallet_dir)
     kwargs = {
         'user': user,
@@ -22,8 +33,14 @@ def _connect(user, password, dsn, wallet_dir, wallet_password=None):
 
 
 def get_global_conn():
-    """Connect as GLOBAL_USER on ATP1 (bankdb_high) — Central node."""
-    return _connect(
+    """Connect as GLOBAL_USER on the central node."""
+    if _MODE == 'docker':
+        return _connect_plain(
+            user=os.environ['GLOBAL_SCHEMA_USER'],
+            password=os.environ['GLOBAL_SCHEMA_PASSWORD'],
+            dsn=os.environ['GLOBAL_DSN'],
+        )
+    return _connect_wallet(
         user=os.environ['GLOBAL_SCHEMA_USER'],
         password=os.environ['GLOBAL_SCHEMA_PASSWORD'],
         dsn=os.environ['GLOBAL_TNS_ALIAS'],
@@ -32,21 +49,22 @@ def get_global_conn():
     )
 
 
-def _connect_tls(user, password, dsn):
-    """Direct TLS connection (port 1521) — no wallet required when mTLS is disabled."""
-    return oracledb.connect(user=user, password=password, dsn=dsn)
-
-
 def get_bucharest_conn():
-    """Connect as BUCHAREST_USER on ATP2 — Bucharest fragment."""
+    """Connect as BUCHAREST_USER on the Bucharest fragment node."""
+    if _MODE == 'docker':
+        return _connect_plain(
+            user=os.environ['BUCHAREST_SCHEMA_USER'],
+            password=os.environ['BUCHAREST_SCHEMA_PASSWORD'],
+            dsn=os.environ['BUCHAREST_DSN'],
+        )
     tls_dsn = os.environ.get('LOCAL_TLS_DSN')
     if tls_dsn:
-        return _connect_tls(
+        return _connect_plain(
             user=os.environ['BUCHAREST_SCHEMA_USER'],
             password=os.environ['BUCHAREST_SCHEMA_PASSWORD'],
             dsn=tls_dsn,
         )
-    return _connect(
+    return _connect_wallet(
         user=os.environ['BUCHAREST_SCHEMA_USER'],
         password=os.environ['BUCHAREST_SCHEMA_PASSWORD'],
         dsn=os.environ['LOCAL_TNS_ALIAS'],
@@ -56,15 +74,21 @@ def get_bucharest_conn():
 
 
 def get_cluj_conn():
-    """Connect as CLUJ_USER on ATP2 — Cluj fragment."""
+    """Connect as CLUJ_USER on the Cluj fragment node."""
+    if _MODE == 'docker':
+        return _connect_plain(
+            user=os.environ['CLUJ_SCHEMA_USER'],
+            password=os.environ['CLUJ_SCHEMA_PASSWORD'],
+            dsn=os.environ['CLUJ_DSN'],
+        )
     tls_dsn = os.environ.get('LOCAL_TLS_DSN')
     if tls_dsn:
-        return _connect_tls(
+        return _connect_plain(
             user=os.environ['CLUJ_SCHEMA_USER'],
             password=os.environ['CLUJ_SCHEMA_PASSWORD'],
             dsn=tls_dsn,
         )
-    return _connect(
+    return _connect_wallet(
         user=os.environ['CLUJ_SCHEMA_USER'],
         password=os.environ['CLUJ_SCHEMA_PASSWORD'],
         dsn=os.environ['LOCAL_TNS_ALIAS'],

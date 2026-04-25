@@ -16,9 +16,8 @@ GRANT UNLIMITED TABLESPACE TO CLUJ_USER;
 
 COMMIT;
 
--- T004: Cross-schema grants so replication trigger can write to both nodes
-GRANT SELECT, INSERT, UPDATE, DELETE ON BUCHAREST_USER.TIPURI_CONT TO CLUJ_USER;
-
-COMMIT;
+-- T004: Cross-schema grant (ATP2 shared instance only — skipped on Docker)
+-- On ATP2: GRANT SELECT, INSERT, UPDATE, DELETE ON BUCHAREST_USER.TIPURI_CONT TO CLUJ_USER;
+-- On Docker: not needed — each node is a separate database; replication uses DB Links.
 
 SELECT 'CLUJ_USER created OK' AS status FROM DUAL;

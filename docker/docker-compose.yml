@@ -1,0 +1,69 @@
+version: '3.8'
+
+# GlobalBank DB — 3 separate Oracle XE 21c instances
+# Uses gvenzl/oracle-free:23-slim (already available, no build required)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d
+#   Wait ~60-90s for health checks to pass
+#   Then: bash scripts/setup-docker.sh
+
+networks:
+  globalbank-net:
+    driver: bridge
+
+services:
+
+  central:
+    image: gvenzl/oracle-free:23-slim
+    container_name: globalbank-central
+    environment:
+      ORACLE_PASSWORD: Admin#DB1
+    ports:
+      - "1521:1521"
+    networks:
+      - globalbank-net
+    volumes:
+      - ./data/central:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  bucharest:
+    image: gvenzl/oracle-free:23-slim
+    container_name: globalbank-bucharest
+    environment:
+      ORACLE_PASSWORD: Admin#DB1
+    ports:
+      - "1522:1521"
+    networks:
+      - globalbank-net
+    volumes:
+      - ./data/bucharest:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  cluj:
+    image: gvenzl/oracle-free:23-slim
+    container_name: globalbank-cluj
+    environment:
+      ORACLE_PASSWORD: Admin#DB1
+    ports:
+      - "1523:1521"
+    networks:
+      - globalbank-net
+    volumes:
+      - ./data/cluj:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
