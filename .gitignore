@@ -8,3 +8,8 @@ assets/screenshots/
 app/.venv/
 .venv/
 docker/data/
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.pdf

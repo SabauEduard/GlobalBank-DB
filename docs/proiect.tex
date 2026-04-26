@@ -71,8 +71,8 @@
 \newcommand{\screenshot}[2]{%
   \begin{figure}[H]
     \centering
-    \IfFileExists{assets/screenshots/#1}{%
-      \includegraphics[width=0.95\textwidth]{assets/screenshots/#1}%
+    \IfFileExists{../assets/screenshots/#1}{%
+      \includegraphics[width=0.95\textwidth]{../assets/screenshots/#1}%
     }{%
       \begin{mdframed}[backgroundcolor=yellow!15, linecolor=orange, linewidth=1pt]
         \centering\vspace{0.5cm}
@@ -90,8 +90,8 @@
 \newcommand{\diagramplaceholder}[2]{%
   \begin{figure}[H]
     \centering
-    \IfFileExists{assets/diagrams/#1}{%
-      \includegraphics[width=0.95\textwidth]{assets/diagrams/#1}%
+    \IfFileExists{../assets/diagrams/#1}{%
+      \includegraphics[width=0.95\textwidth]{../assets/diagrams/#1}%
     }{%
       \begin{mdframed}[backgroundcolor=blue!5, linecolor=blue!40, linewidth=1pt]
         \centering\vspace{1cm}
@@ -112,13 +112,13 @@
     pdfauthor={Sabău Eduard},
 }
 
-\graphicspath{{assets/screenshots/}{assets/diagrams/}}
+\graphicspath{{../assets/screenshots/}{../assets/diagrams/}}
 
 % ── Title ─────────────────────────────────────────────────────────────────────
 \title{
     \textbf{Metode de Optimizare și Distribuire în Baze de Date} \\[0.5em]
     \large Proiect: GlobalBank DB \\
-    \normalsize Sistem Bancar Distribuit pe Oracle Cloud ATP
+    \normalsize Sistem Bancar Distribuit — Oracle 23ai Free (Docker)
 }
 \author{
     \textbf{Echipă}: [COMPLETAȚI] \\
@@ -136,9 +136,9 @@
 
 \begin{center}
 \begin{tabular}{ll}
-  \textbf{Baza de date}: & Oracle Autonomous Database 19c (Cloud Free Tier) \\
-  \textbf{Instanțe}:     & ATP1 (bankdb) — Central; ATP2 (globalbanklocal) — Local \\
-  \textbf{Regiune OCI}:  & eu-turin-1 \\
+  \textbf{Baza de date}: & Oracle 23ai Free (\texttt{gvenzl/oracle-free:23-slim}) \\
+  \textbf{Deployment}:   & Docker — 3 containere independente pe rețeaua \texttt{globalbank-net} \\
+  \textbf{Porturi}:      & Central:1521 \quad București:1522 \quad Cluj:1523 \\
 \end{tabular}
 \end{center}
 
@@ -163,12 +163,16 @@ cu sucursale în București și Cluj. Sistemul asigură:
 
 Arhitectura rețelei de baze de date:
 \begin{itemize}
-  \item \textbf{Nod Central (ATP1 — bankdb)}: coordonator, vederi globale, credite, profiluri clienți
-  \item \textbf{Nod Local 1 (ATP2 — BUCHAREST\_USER)}: sucursala București, conturi B, tranzacții B
-  \item \textbf{Nod Local 2 (ATP2 — CLUJ\_USER)}: sucursala Cluj, conturi C, tranzacții C
+  \item \textbf{Nod Central (\texttt{globalbank-central}:1521 — GLOBAL\_USER)}: coordonator, vederi globale, credite, profiluri clienți
+  \item \textbf{Nod Local 1 (\texttt{globalbank-bucharest}:1522 — BUCHAREST\_USER)}: sucursala București, conturi B, tranzacții B
+  \item \textbf{Nod Local 2 (\texttt{globalbank-cluj}:1523 — CLUJ\_USER)}: sucursala Cluj, conturi C, tranzacții C
 \end{itemize}
-Comunicarea inter-nod se realizează prin \textbf{DB Links} (\texttt{BUCHAREST\_LINK}, \texttt{CLUJ\_LINK})
-create cu \texttt{DBMS\_CLOUD\_ADMIN.CREATE\_DATABASE\_LINK} (protocol TCPS/mTLS).
+Comunicarea inter-nod se realizează prin \textbf{DB Links} standard Oracle (\texttt{BUCHAREST\_LINK}, \texttt{CLUJ\_LINK}),
+create cu \texttt{CREATE DATABASE LINK \ldots{} USING '(DESCRIPTION=\ldots{})'} (protocol TCP, rețea Docker bridge \texttt{globalbank-net}).
+
+\textit{Notă}: Proiectul suportă și deployment pe \textbf{Oracle Autonomous Transaction Processing (ATP) Free Tier}
+(2 instanțe cloud, protocol TCPS/mTLS, DB Links prin \texttt{DBMS\_CLOUD\_ADMIN}),
+disponibil prin scriptul \texttt{scripts/setup-all.sh}.
 
 % ──────────────────────────────────────────────────────────────────────────────
 \section{Diagramele bazei de date OLTP inițiale}
@@ -213,22 +217,27 @@ PLATI\_RATE & ID\_Plata (PK), Data\_Plata, Suma & CREDITE \\
 % ──────────────────────────────────────────────────────────────────────────────
 \section{Descrierea modului de distribuire}
 
-Rețeaua de baze de date conține \textbf{2 servere Oracle ATP} (instanțe Oracle Cloud):
+Rețeaua de baze de date conține \textbf{3 containere Docker independente}, fiecare cu propria instanță Oracle 23ai Free:
 
 \begin{center}
 \begin{tabular}{lllll}
 \toprule
-\textbf{Server} & \textbf{Instanță} & \textbf{Schemă} & \textbf{Rol} & \textbf{Regiune} \\
+\textbf{Container} & \textbf{Port} & \textbf{Schemă} & \textbf{Rol} & \textbf{PDB} \\
 \midrule
-ATP1 & bankdb & GLOBAL\_USER & Nod Global / Central & eu-turin-1 \\
-ATP2 & globalbanklocal & BUCHAREST\_USER & Nod Local 1 & eu-turin-1 \\
-ATP2 & globalbanklocal & CLUJ\_USER & Nod Local 2 & eu-turin-1 \\
+\texttt{globalbank-central}   & 1521 & GLOBAL\_USER    & Nod Global / Central & \texttt{freepdb1} \\
+\texttt{globalbank-bucharest} & 1522 & BUCHAREST\_USER & Nod Local 1          & \texttt{freepdb1} \\
+\texttt{globalbank-cluj}      & 1523 & CLUJ\_USER      & Nod Local 2          & \texttt{freepdb1} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\textit{Notă}: ATP2 găzduiește ambele noduri locale pe aceeași instanță Oracle Cloud Free Tier,
-în scheme separate, simulate ca noduri independente prin DB Links distincte.
+Imaginea \texttt{gvenzl/oracle-free:23-slim} suportă nativ ARM64 (Apple Silicon) și x86-64.
+Fiecare container are propriul proces Oracle (SID=FREE, PDB=freepdb1), volume de date separate
+și este conectat doar prin DB Links standard pe rețeaua bridge \texttt{globalbank-net}.
+
+\textit{Notă}: O variantă alternativă de deployment folosește \textbf{Oracle ATP Free Tier} —
+2 instanțe cloud (ATP1 pentru Central, ATP2 pentru nodurile locale în scheme separate).
+În varianta ATP, DB Links se creează cu \texttt{DBMS\_CLOUD\_ADMIN} și folosesc protocol TCPS/mTLS.
 
 % ──────────────────────────────────────────────────────────────────────────────
 \section{Argumentarea deciziei de fragmentare}
@@ -335,13 +344,14 @@ CLIENTI_GLOBAL = CLIENTI_ID@BUCHAREST_LINK JOIN CLIENTI_PROFIL ON ID_Client
   \item Cu replicare, FK-ul local funcționează fără trafic de rețea
 \end{itemize}
 
-\textbf{Tip replicare}: asincronă, tranzacțională, \textbf{single-master}
-(ATP1 → ATP2; modificările se propagă automat prin triggerul \texttt{TRG\_REPLICATE\_TIPURI\_CONT})
+\textbf{Tip replicare}: sincronă, tranzacțională, \textbf{single-master}
+(Central → noduri locale; modificările se propagă automat în aceeași tranzacție
+prin triggerul \texttt{TRG\_REPLICATE\_TIPURI\_CONT})
 
 % ──────────────────────────────────────────────────────────────────────────────
 \section{Schemele conceptuale locale}
 
-\subsection{Schema locală București (BUCHAREST\_USER pe ATP2)}
+\subsection{Schema locală București (BUCHAREST\_USER — container Bucharest:1522)}
 
 \begin{center}
 \begin{tabular}{ll}
@@ -361,11 +371,11 @@ ANGAJAT\_CLIENT\_B & Relație M:N locală: angajat gestionează client \\
 
 Secvențe: \texttt{SEQ\_CLIENT\_B} (1–999\,999), \texttt{SEQ\_CONT\_B} (1–999\,999), \texttt{SEQ\_TRANZ\_B} (1–999\,999)
 
-\subsection{Schema locală Cluj (CLUJ\_USER pe ATP2)}
+\subsection{Schema locală Cluj (CLUJ\_USER — container Cluj:1523)}
 
 Structură identică cu sufixul \texttt{\_C}. Secvențe pornind de la 1\,000\,001 pentru unicitate globală.
 
-\subsection{Schema globală (GLOBAL\_USER pe ATP1)}
+\subsection{Schema globală (GLOBAL\_USER — container Central:1521)}
 
 \begin{center}
 \begin{tabular}{ll}
@@ -434,16 +444,16 @@ SUCURSALE & ID\_Sucursala & Central \\
 
 \subsection{Cheie externă}
 
-\textbf{Locale (DDL, same instance)}:
+\textbf{Locale (DDL, same container)}:
 \begin{lstlisting}[caption={FK-uri locale}]
-CONTURI_B.ID_Tip     -> TIPURI_CONT.ID_Tip    (FK local pe ATP2)
-CONTURI_B.ID_Client  -> CLIENTI_ID.ID_Client  (FK local pe ATP2)
-PLATI_RATE.ID_Credit -> CREDITE.ID_Credit     (FK local pe ATP1)
+CONTURI_B.ID_Tip     -> TIPURI_CONT.ID_Tip    (FK local pe containerul Bucharest)
+CONTURI_B.ID_Client  -> CLIENTI_ID.ID_Client  (FK local pe containerul Bucharest)
+PLATI_RATE.ID_Credit -> CREDITE.ID_Credit     (FK local pe containerul Central)
 \end{lstlisting}
 
 \textbf{Cross-nod (simulate prin triggere — Oracle nu suportă DDL FK inter-instance)}:
 \begin{lstlisting}[caption={FK cross-nod implementate prin triggere}]
--- TRG_BEF_INS_CREDITE (pe ATP1):
+-- TRG_BEF_INS_CREDITE (pe Central):
 -- CREDITE.ID_Client trebuie sa existe in CLIENTI_ID@BUCHAREST_LINK
 BEFORE INSERT ON CREDITE FOR EACH ROW DECLARE v_count NUMBER;
 BEGIN
@@ -482,9 +492,9 @@ după suma tranzacționată."}
 
 Această cerere implică:
 \begin{itemize}
-  \item JOIN distribuit pe 3 vederi globale (accesează simultan ATP1 și ATP2)
-  \item Filtru pe \texttt{CLIENTI\_PROFIL.Scor\_Credit} (stocată central)
-  \item Agregare cross-fragment (\texttt{SUM}, \texttt{COUNT} pe date de pe ambele noduri locale)
+  \item JOIN distribuit pe 3 vederi globale (accesează simultan containerul Central și cele 2 noduri locale)
+  \item Filtru pe \texttt{CLIENTI\_PROFIL.Scor\_Credit} (stocată pe Central)
+  \item Agregare cross-fragment (\texttt{SUM}, \texttt{COUNT} pe date de pe ambele noduri locale via DB Links)
 \end{itemize}
 
 \textbf{Tehnici de optimizare aplicabile}:
@@ -503,34 +513,34 @@ Această cerere implică:
 
 \section{Crearea bazelor de date și utilizatorilor}
 
-\subsection{GLOBAL\_USER pe ATP1 (Central)}
-\lstinputlisting[caption={sql/global/00-setup-global-user.sql},style=sqlstyle]{../sql/global/00-setup-global-user.sql}
-\screenshot{N2-bd/01-users/01-global-user-created.png}{GLOBAL\_USER creat cu succes pe ATP1}
+\subsection{GLOBAL\_USER pe Central (Docker)}
+\lstinputlisting[caption={sql/docker/global/00-setup-global-user.sql},style=sqlstyle]{../sql/docker/global/00-setup-global-user.sql}
+\screenshot{N2-bd/01-users/01-global-user-created.png}{GLOBAL\_USER creat cu succes pe containerul Central}
 
-\subsection{BUCHAREST\_USER pe ATP2 (Local)}
+\subsection{BUCHAREST\_USER pe Bucharest (Docker)}
 \lstinputlisting[caption={sql/bucharest/00-setup-bucharest.sql},style=sqlstyle]{../sql/bucharest/00-setup-bucharest.sql}
-\screenshot{N2-bd/01-users/02-bucharest-user-created.png}{BUCHAREST\_USER creat cu succes pe ATP2}
+\screenshot{N2-bd/01-users/02-bucharest-user-created.png}{BUCHAREST\_USER creat cu succes pe containerul Bucharest}
 
-\subsection{CLUJ\_USER pe ATP2 (Local)}
+\subsection{CLUJ\_USER pe Cluj (Docker)}
 \lstinputlisting[caption={sql/cluj/00-setup-cluj.sql},style=sqlstyle]{../sql/cluj/00-setup-cluj.sql}
-\screenshot{N2-bd/01-users/03-cluj-user-created.png}{CLUJ\_USER creat cu succes pe ATP2}
+\screenshot{N2-bd/01-users/03-cluj-user-created.png}{CLUJ\_USER creat cu succes pe containerul Cluj}
 
-\subsection{DB Links (GLOBAL\_USER pe ATP1)}
-\lstinputlisting[caption={sql/global/01b-db-links-global-user.sql},style=sqlstyle]{../sql/global/01b-db-links-global-user.sql}
-\screenshot{N2-bd/01-users/04-db-links-verified.png}{BUCHAREST\_LINK și CLUJ\_LINK verificate cu SELECT 1 FROM DUAL@...}
+\subsection{DB Links (GLOBAL\_USER pe Central)}
+\lstinputlisting[caption={sql/docker/global/01-db-links.sql},style=sqlstyle]{../sql/docker/global/01-db-links.sql}
+\screenshot{N2-bd/01-users/04-db-links-verified.png}{BUCHAREST\_LINK și CLUJ\_LINK verificate cu SELECT USER FROM DUAL@...}
 
 % ──────────────────────────────────────────────────────────────────────────────
 \section{Crearea relațiilor și fragmentelor}
 
-\subsection{Schema centrală (GLOBAL\_USER)}
+\subsection{Schema centrală (GLOBAL\_USER — container Central:1521)}
 \lstinputlisting[caption={sql/global/02-schema-central.sql},style=sqlstyle]{../sql/global/02-schema-central.sql}
 \screenshot{N2-bd/02-schema/01-central-schema.png}{Tabele centrale create: SUCURSALE, TIPURI\_CONT, CLIENTI\_PROFIL, CREDITE, PLATI\_RATE, LOG\_ACCES}
 
-\subsection{Fragment orizontal — București (BUCHAREST\_USER)}
+\subsection{Fragment orizontal — București (BUCHAREST\_USER — container Bucharest:1522)}
 \lstinputlisting[caption={sql/bucharest/01-schema-bucharest.sql},style=sqlstyle]{../sql/bucharest/01-schema-bucharest.sql}
 \screenshot{N2-bd/02-schema/02-bucharest-schema.png}{Tabele București create: CONTURI\_B, TRANZACTII\_B, CLIENTI\_ID și altele}
 
-\subsection{Fragment orizontal — Cluj (CLUJ\_USER)}
+\subsection{Fragment orizontal — Cluj (CLUJ\_USER — container Cluj:1523)}
 \lstinputlisting[caption={sql/cluj/01-schema-cluj.sql},style=sqlstyle]{../sql/cluj/01-schema-cluj.sql}
 \screenshot{N2-bd/02-schema/03-cluj-schema.png}{Tabele Cluj create: CONTURI\_C, TRANZACTII\_C, CLIENTI\_ID și altele}
 
@@ -560,8 +570,8 @@ Această cerere implică:
 \screenshot{N2-bd/04-transparency/04-s2-transfer.png}{S2: UPDATE ID\_Sucursala=2 — contul se mută din CONTURI\_B în CONTURI\_C (Nod B→C)}
 
 \subsection{Transparență tabele altă BD față de aplicație}
-Aplicația Flask se conectează exclusiv la \texttt{GLOBAL\_USER} pe ATP1 și accesează datele
-din ATP2 prin DB Links, ca și când nu ar exista distribuire.
+Aplicația Flask se conectează exclusiv la \texttt{GLOBAL\_USER} pe containerul Central (port 1521)
+și accesează datele de pe celelalte două containere prin DB Links, ca și când nu ar exista distribuire.
 \screenshot{N2-bd/04-transparency/05-app-global-connection.png}{Aplicația Flask — ruta /global returnează date din ambele noduri locale}
 
 % ──────────────────────────────────────────────────────────────────────────────
@@ -617,7 +627,7 @@ Operațiile REMOTE sunt vizibile pentru ambele DB Links.
 Ruta \texttt{/local/<branch>} (Bucharest / Cluj) permite:
 \begin{itemize}
   \item Vizualizarea conturilor și tranzacțiilor locale
-  \item Adăugarea unui cont nou (\texttt{INSERT INTO CONTURI\_B/C} direct pe ATP2)
+  \item Adăugarea unui cont nou (\texttt{INSERT INTO CONTURI\_B/C} direct pe nodul local)
   \item Ștergerea unui cont
   \item Adăugarea unei tranzacții
 \end{itemize}
