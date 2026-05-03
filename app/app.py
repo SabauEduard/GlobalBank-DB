@@ -144,22 +144,29 @@ def global_view():
 
 @app.route('/demo/local-to-global', methods=['GET', 'POST'])
 def demo_local_to_global():
+    # Horizontal fragment (CONTURI) demo state
     before_b, before_c, after_b, after_c = [], [], [], []
     inserted = None
 
-    if request.method == 'POST':
+    # Vertical fragment (CLIENTI_ID) demo state
+    cl_b_before, cl_b_after = [], []
+    cl_c_before, cl_c_after = [], []
+    cl_global_before, cl_global_after = [], []
+    inserted_client = None
+
+    demo_type = request.form.get('demo_type') if request.method == 'POST' else None
+
+    if request.method == 'POST' and demo_type == 'horizontal':
         branch = request.form['branch']
         suffix = 'B' if branch == 'bucharest' else 'C'
         meta   = BRANCHES[branch]
         seq    = f'SEQ_CONT_{suffix}'
 
-        # Snapshot before
         cb = get_bucharest_conn()
         cc = get_cluj_conn()
         before_b = query(cb, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_B ORDER BY ID_Cont')
         before_c = query(cc, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_C ORDER BY ID_Cont')
 
-        # Insert directly into the local fragment
         conn = get_branch_conn(branch)
         try:
             execute(conn,
@@ -174,17 +181,63 @@ def demo_local_to_global():
                 })
             inserted = {'branch': branch, 'iban': request.form['iban']}
         except Exception as e:
-            flash(f'Eroare insert local: {e}', 'danger')
+            flash(f'Eroare insert cont local: {e}', 'danger')
         finally:
             conn.close()
 
-        # Snapshot after (same direct connections — no DB Link needed)
         after_b = query(cb, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_B ORDER BY ID_Cont')
         after_c = query(cc, 'SELECT ID_Cont, IBAN, ID_Sucursala, Sold FROM CONTURI_C ORDER BY ID_Cont')
         cb.close()
         cc.close()
 
-    # Fetch clients for the form
+    elif request.method == 'POST' and demo_type == 'clienti':
+        branch = request.form['branch']
+        suffix = 'B' if branch == 'bucharest' else 'C'
+        seq    = f'SEQ_CLIENT_{suffix}'
+        cnp    = request.form['cnp']
+        params = {'nume': request.form['nume'], 'prenume': request.form['prenume'], 'cnp': cnp}
+
+        cb = get_bucharest_conn()
+        cc = get_cluj_conn()
+        cg = get_global_conn()
+
+        cl_b_before = query(cb, 'SELECT ID_Client, Nume, Prenume, CNP FROM CLIENTI_ID ORDER BY ID_Client')
+        cl_c_before = query(cc, 'SELECT ID_Client, Nume, Prenume, CNP FROM CLIENTI_ID ORDER BY ID_Client')
+        try:
+            cl_global_before = query(cg, 'SELECT ID_Client, Nume, Prenume, Scor_Credit FROM CLIENTI_GLOBAL ORDER BY ID_Client')
+        except Exception:
+            cl_global_before = []
+
+        conn = get_branch_conn(branch)
+        try:
+            v_id = query(conn, f'SELECT {seq}.NEXTVAL AS nid FROM DUAL')[0]['nid']
+            row  = {'id': v_id, **params}
+            sql  = 'INSERT INTO CLIENTI_ID (ID_Client, Nume, Prenume, CNP) VALUES (:id, :nume, :prenume, :cnp)'
+            # CLIENTI_ID is replicated on both local nodes — write to both directly
+            execute(cb, sql, row)
+            execute(cc, sql, row)
+            # Profile fragment lives only on Central
+            execute(cg,
+                'INSERT INTO CLIENTI_PROFIL (ID_Client, Email, Telefon, Scor_Credit) VALUES (:id, :email, :tel, :scor)',
+                {'id': v_id, 'email': request.form.get('email', ''), 'tel': request.form.get('telefon', ''),
+                 'scor': int(request.form.get('scor_credit', 500))})
+            inserted_client = {'branch': branch, 'cnp': cnp, 'id': v_id, 'suffix': suffix}
+        except Exception as e:
+            flash(f'Eroare insert client: {e}', 'danger')
+        finally:
+            conn.close()
+
+        cl_b_after = query(cb, 'SELECT ID_Client, Nume, Prenume, CNP FROM CLIENTI_ID ORDER BY ID_Client')
+        cl_c_after = query(cc, 'SELECT ID_Client, Nume, Prenume, CNP FROM CLIENTI_ID ORDER BY ID_Client')
+        try:
+            cl_global_after = query(cg, 'SELECT ID_Client, Nume, Prenume, Scor_Credit FROM CLIENTI_GLOBAL ORDER BY ID_Client')
+        except Exception:
+            cl_global_after = []
+        cb.close()
+        cc.close()
+        cg.close()
+
+    # Clients list for the horizontal form dropdown
     try:
         conn = get_bucharest_conn()
         clienti = query(conn, 'SELECT ID_Client, Nume, Prenume FROM CLIENTI_ID ORDER BY ID_Client')
@@ -192,7 +245,7 @@ def demo_local_to_global():
     except Exception:
         clienti = []
 
-    # Vertical fragmentation: show CLIENTI split across nodes
+    # Static display: current vertical fragmentation state
     clienti_b, clienti_c, clienti_profil = [], [], []
     try:
         cb = get_bucharest_conn()
@@ -217,10 +270,14 @@ def demo_local_to_global():
                            branches=BRANCHES,
                            clienti=clienti,
                            before_b=before_b, before_c=before_c,
-                           after_b=after_b,  after_c=after_c,
+                           after_b=after_b,   after_c=after_c,
                            inserted=inserted,
                            clienti_b=clienti_b, clienti_c=clienti_c,
-                           clienti_profil=clienti_profil)
+                           clienti_profil=clienti_profil,
+                           cl_b_before=cl_b_before, cl_b_after=cl_b_after,
+                           cl_c_before=cl_c_before, cl_c_after=cl_c_after,
+                           cl_global_before=cl_global_before, cl_global_after=cl_global_after,
+                           inserted_client=inserted_client)
 
 
 # ── FR-APP-04: Global → Local fragmentation demo ─────────────────────────────
@@ -362,8 +419,13 @@ def demo_replication():
             cg.close()
             inserted = request.form['denumire']
         except Exception as e:
-            db_links_ok = False
-            flash(f'Eroare insert master: {e}', 'danger')
+            repl_error = str(e)
+            if 'ORA-' in repl_error and ('LINK' in repl_error.upper() or '12541' in repl_error or '02019' in repl_error):
+                flash(f'Triggerul a inserat pe master, dar replicarea a esuat (DB Link inactiv): {e}', 'warning')
+                db_links_ok = False
+            else:
+                flash(f'Eroare insert master: {e}', 'danger')
+                db_links_ok = False
 
         after_master, after_b, after_c = _load_all()
 

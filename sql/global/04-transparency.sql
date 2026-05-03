@@ -101,17 +101,30 @@ END;
 
 -- ============================================================
 -- T036/T037: trg_iof_conturi_global
--- INSERT:  route by ID_Sucursala (1=B, 2=C), get remote sequence ID
--- UPDATE:  same-fragment update; cross-fragment transfer = DELETE+INSERT
--- DELETE:  remove from correct fragment
+-- INSERT:  route by ID_Sucursala (1=Bucharest, 2=Cluj)
+-- UPDATE:  in-place update on the same fragment (Sold, IBAN, etc.)
+-- DELETE:  cascade-delete children then parent from correct fragment
 -- ============================================================
 CREATE OR REPLACE TRIGGER trg_iof_conturi_global
 INSTEAD OF INSERT OR UPDATE OR DELETE ON CONTURI_GLOBAL
 FOR EACH ROW
 DECLARE
-  v_id NUMBER(10);
+  v_id     NUMBER(10);
+  v_cnt    NUMBER(1);
 BEGIN
   IF INSERTING THEN
+    -- Global IBAN uniqueness: check both fragments before inserting
+    SELECT COUNT(*) INTO v_cnt
+    FROM (
+      SELECT IBAN FROM CONTURI_B@BUCHAREST_LINK WHERE IBAN = :NEW.IBAN
+      UNION ALL
+      SELECT IBAN FROM CONTURI_C@CLUJ_LINK       WHERE IBAN = :NEW.IBAN
+    ) WHERE ROWNUM = 1;
+    IF v_cnt > 0 THEN
+      RAISE_APPLICATION_ERROR(-20001,
+        'IBAN ' || :NEW.IBAN || ' already exists globally (unicitate globala IBAN)');
+    END IF;
+
     IF :NEW.ID_Sucursala = 1 THEN
       SELECT SEQ_CONT_B.NEXTVAL@BUCHAREST_LINK INTO v_id FROM DUAL;
       INSERT INTO CONTURI_B@BUCHAREST_LINK
@@ -127,35 +140,25 @@ BEGIN
     END IF;
 
   ELSIF UPDATING THEN
-    IF :OLD.ID_Sucursala = 1 AND :NEW.ID_Sucursala = 1 THEN
+    IF :OLD.ID_Sucursala = 1 THEN
       UPDATE CONTURI_B@BUCHAREST_LINK
         SET IBAN=:NEW.IBAN, ID_Tip=:NEW.ID_Tip, Sold=:NEW.Sold, Moneda=:NEW.Moneda
         WHERE ID_Cont = :OLD.ID_Cont;
-    ELSIF :OLD.ID_Sucursala = 2 AND :NEW.ID_Sucursala = 2 THEN
+    ELSE
       UPDATE CONTURI_C@CLUJ_LINK
         SET IBAN=:NEW.IBAN, ID_Tip=:NEW.ID_Tip, Sold=:NEW.Sold, Moneda=:NEW.Moneda
         WHERE ID_Cont = :OLD.ID_Cont;
-    ELSIF :OLD.ID_Sucursala = 1 AND :NEW.ID_Sucursala = 2 THEN
-      -- Transfer B → C: delete from Bucharest, insert into Cluj
-      DELETE FROM CONTURI_B@BUCHAREST_LINK WHERE ID_Cont = :OLD.ID_Cont;
-      SELECT SEQ_CONT_C.NEXTVAL@CLUJ_LINK INTO v_id FROM DUAL;
-      INSERT INTO CONTURI_C@CLUJ_LINK
-        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
-        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, :NEW.Sold, :NEW.Moneda, 2, :NEW.ID_Client);
-    ELSIF :OLD.ID_Sucursala = 2 AND :NEW.ID_Sucursala = 1 THEN
-      -- Transfer C → B: delete from Cluj, insert into Bucharest
-      DELETE FROM CONTURI_C@CLUJ_LINK WHERE ID_Cont = :OLD.ID_Cont;
-      SELECT SEQ_CONT_B.NEXTVAL@BUCHAREST_LINK INTO v_id FROM DUAL;
-      INSERT INTO CONTURI_B@BUCHAREST_LINK
-        (ID_Cont, IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
-        VALUES (v_id, :NEW.IBAN, :NEW.ID_Tip, :NEW.Sold, :NEW.Moneda, 1, :NEW.ID_Client);
     END IF;
 
   ELSIF DELETING THEN
     IF :OLD.ID_Sucursala = 1 THEN
-      DELETE FROM CONTURI_B@BUCHAREST_LINK WHERE ID_Cont = :OLD.ID_Cont;
+      DELETE FROM TRANZACTII_B@BUCHAREST_LINK WHERE ID_Cont_Sursa = :OLD.ID_Cont;
+      DELETE FROM CARDURI_B@BUCHAREST_LINK    WHERE ID_Cont       = :OLD.ID_Cont;
+      DELETE FROM CONTURI_B@BUCHAREST_LINK    WHERE ID_Cont       = :OLD.ID_Cont;
     ELSE
-      DELETE FROM CONTURI_C@CLUJ_LINK WHERE ID_Cont = :OLD.ID_Cont;
+      DELETE FROM TRANZACTII_C@CLUJ_LINK WHERE ID_Cont_Sursa = :OLD.ID_Cont;
+      DELETE FROM CARDURI_C@CLUJ_LINK    WHERE ID_Cont       = :OLD.ID_Cont;
+      DELETE FROM CONTURI_C@CLUJ_LINK    WHERE ID_Cont       = :OLD.ID_Cont;
     END IF;
   END IF;
 END;
@@ -218,21 +221,27 @@ SELECT ID_Client FROM CLIENTI_ID@CLUJ_LINK     WHERE CNP = '1990101400999';
 ROLLBACK;
 
 -- ============================================================
--- T040: Verify S2 — account transfer between branches
+-- T040: Verify S2 — horizontal transparency via INSERT routing
+-- The user works only with CONTURI_GLOBAL; the trigger routes
+-- each row to the correct physical fragment automatically.
 -- ============================================================
--- Insert a new account at Bucharest
+-- Insert one account per branch via the unified global view:
 INSERT INTO CONTURI_GLOBAL (IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
 VALUES ('RO49GLOBTEST00000000001', 1, 1000, 'RON', 1, 1);
+INSERT INTO CONTURI_GLOBAL (IBAN, ID_Tip, Sold, Moneda, ID_Sucursala, ID_Client)
+VALUES ('RO49GLOBTEST00000000002', 1, 2500, 'RON', 2, 1);
 COMMIT;
--- Confirm it's in Bucharest fragment:
-SELECT ID_Cont, IBAN, ID_Sucursala, Nod FROM CONTURI_GLOBAL
+-- Both rows are visible via the unified view; Nod shows physical location:
+SELECT ID_Cont, IBAN, Sold, ID_Sucursala, Nod FROM CONTURI_GLOBAL
+  WHERE IBAN IN ('RO49GLOBTEST00000000001', 'RO49GLOBTEST00000000002');
+-- Update Sold on the Bucharest account without knowing it lives in CONTURI_B:
+UPDATE CONTURI_GLOBAL SET Sold = 1500
   WHERE IBAN = 'RO49GLOBTEST00000000001';
--- Transfer to Cluj by updating ID_Sucursala:
-UPDATE CONTURI_GLOBAL SET ID_Sucursala = 2 WHERE IBAN = 'RO49GLOBTEST00000000001';
 COMMIT;
--- Confirm it moved to Cluj fragment:
-SELECT ID_Cont, IBAN, ID_Sucursala, Nod FROM CONTURI_GLOBAL
+-- Confirm the update was applied to the correct fragment:
+SELECT ID_Cont, IBAN, Sold, Nod FROM CONTURI_GLOBAL
   WHERE IBAN = 'RO49GLOBTEST00000000001';
 -- Cleanup test data:
-DELETE FROM CONTURI_GLOBAL WHERE IBAN = 'RO49GLOBTEST00000000001';
+DELETE FROM CONTURI_GLOBAL
+  WHERE IBAN IN ('RO49GLOBTEST00000000001', 'RO49GLOBTEST00000000002');
 COMMIT;

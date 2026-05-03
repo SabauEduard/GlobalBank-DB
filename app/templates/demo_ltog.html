@@ -6,7 +6,10 @@
    devine imediat vizibila in vederea globala CONTURI_GLOBAL.</p>
 
 <form method="post" class="form-card">
-  <h2>Adauga cont in fragment local</h2>
+  <input type="hidden" name="demo_type" value="horizontal">
+  <h2>3.2a — Inserare directa in fragment orizontal (CONTURI)</h2>
+  <p>Insereaza un cont direct in <code>CONTURI_B</code> sau <code>CONTURI_C</code>,
+     fara a trece prin <code>CONTURI_GLOBAL</code>.</p>
   <label>Sucursala
     <select name="branch">
       {% for key, meta in branches.items() %}
@@ -71,11 +74,108 @@
     </table>
   </div>
 </div>
-<p class="note">Nota: CONTURI_GLOBAL = CONTURI_B ∪ CONTURI_C via DB Links (necesita TLS activ).</p>
+<p class="note">Nota: CONTURI_GLOBAL = CONTURI_B ∪ CONTURI_C via DB Links (necesita containere active).</p>
 {% endif %}
 
 <hr>
-<h2>Fragmentare verticala — structura CLIENTI</h2>
+<h2>3.2b — Inserare directa in fragment vertical (CLIENTI_ID)</h2>
+<p><code>CLIENTI_ID</code> este <strong>replicat identic pe ambele noduri locale</strong>
+   (la fel cum face triggerul INSTEAD OF pe <code>CLIENTI_GLOBAL</code>).
+   Formularul de mai jos insereaza randul direct, fara a trece prin vederea globala:
+   scrie in <code>CLIENTI_ID</code> pe <em>ambii</em> noduri locali si in
+   <code>CLIENTI_PROFIL</code> pe Central, astfel incat <code>CLIENTI_GLOBAL</code>
+   (JOIN intre cele doua fragmente verticale) sa rezolve imediat randul nou.</p>
+
+<form method="post" class="form-card">
+  <input type="hidden" name="demo_type" value="clienti">
+  <label>Sucursala (nodul local tinta)
+    <select name="branch">
+      {% for key, meta in branches.items() %}
+      <option value="{{ key }}">{{ meta.label }} — CLIENTI_ID pe nodul {{ meta.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Nume      <input name="nume"    required placeholder="Popescu"></label>
+  <label>Prenume   <input name="prenume" required placeholder="Ion"></label>
+  <label>CNP       <input name="cnp"     required placeholder="1900101400001" maxlength="13"></label>
+  <label>Email     <input name="email"   type="email" placeholder="ion@bank.ro"></label>
+  <label>Telefon   <input name="telefon" placeholder="0700000001"></label>
+  <label>Scor Credit <input name="scor_credit" type="number" min="0" max="999" value="500"></label>
+  <button class="btn">Insereaza CLIENTI_ID local + CLIENTI_PROFIL Central</button>
+</form>
+
+{% if inserted_client %}
+<div class="alert alert-success">
+  Client CNP <strong>{{ inserted_client.cnp }}</strong> (ID={{ inserted_client.id }})
+  inserat direct in <code>CLIENTI_ID</code> pe <strong>ambele noduri locale</strong>
+  si in <code>CLIENTI_PROFIL</code> pe Central —
+  fara a trece prin <code>CLIENTI_GLOBAL</code>.
+</div>
+
+<div class="diff-view" style="grid-template-columns: 1fr 1fr">
+  <div>
+    <h3>CLIENTI_ID@Bucuresti — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in cl_b_before %}
+        <tr class="before"><td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in cl_b_after %}
+        <tr class="{% if r not in cl_b_before %}new-row{% endif %}">
+          <td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>CLIENTI_ID@Cluj — inainte / dupa</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in cl_c_before %}
+        <tr class="before"><td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="arrow">▼ dupa inserare ▼</p>
+    <table>
+      <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>CNP</th></tr></thead>
+      <tbody>
+        {% for r in cl_c_after %}
+        <tr class="{% if r not in cl_c_before %}new-row{% endif %}">
+          <td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td class="mono">{{ r.cnp }}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if cl_global_after %}
+<h3 style="margin-top:1.5rem">CLIENTI_GLOBAL (reconstituire via DB Links) — dupa inserare</h3>
+<p class="note">Noul client apare in <code>CLIENTI_GLOBAL</code> datorita JOIN-ului cu
+  <code>CLIENTI_PROFIL</code>. <code>CLIENTI_ID</code> este identic pe ambele noduri —
+  inserarea directa replica comportamentul triggerului INSTEAD OF de pe <code>CLIENTI_GLOBAL</code>.</p>
+<table>
+  <thead><tr><th>ID</th><th>Nume</th><th>Prenume</th><th>Scor_Credit</th></tr></thead>
+  <tbody>
+    {% for r in cl_global_after %}
+    <tr class="{% if r not in cl_global_before %}new-row{% endif %}">
+      <td>{{ r.id_client }}</td><td>{{ r.nume }}</td><td>{{ r.prenume }}</td><td>{{ r.scor_credit }}</td>
+    </tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+
+<hr>
+<h2>Structura curenta a fragmentarii verticale CLIENTI</h2>
 <p>Relatia <strong>CLIENTI</strong> este fragmentata <em>vertical</em>: datele de identificare
    (Nume, Prenume, CNP) sunt stocate in nodurile locale, iar profilul (Email, Telefon,
    Scor_Credit) este stocat in nodul central. Vederea <code>CLIENTI_GLOBAL</code> le reuneste
